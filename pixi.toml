@@ -7,9 +7,7 @@ platforms = ["linux-64"]
 version = "0.0.1"
 
 [dependencies]
-# python = "3.11.*"
 python = "3.8.*"
-# xorg-libx11 = "*"
 
 [pypi-dependencies]
 jupyterlab = "*"
@@ -28,8 +26,8 @@ pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/cu124" ]
 torch = "*"
 torchvision = "*"
 
-[feature.isaacgym]
-
+[feature.isaacgym.tasks]
+joint-monkey = { cmd = "python joint_monkey.py", cwd = "isaacgym/python/examples" }
 
 [feature.isaacgym.pypi-dependencies]
 isaacgym = { path = "./isaacgym/python", editable = true }
