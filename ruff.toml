@@ -1,0 +1,2 @@
+[format]
+extend-exclude = ["modules", ".pixi", "workspaces", "isaacgym"]

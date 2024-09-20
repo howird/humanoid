@@ -12,21 +12,42 @@ python = "3.8.*"
 [pypi-dependencies]
 jupyterlab = "*"
 matplotlib = "*"
+ruff = "*"
+torch = "*"
+torchvision = "*"
+
+[tasks]
+slint = "python -m ruff check"
+lint = "python -m ruff format"
+check-torch = { cmd = "python check_torch.py --cpu", cwd = "scripts" }
 
 [environments]
-isaacgym = ["cuda", "isaacgym"]
 cuda = ["cuda"]
+isaacgym = ["cuda", "isaacgym"]
+skillmimic = ["cuda", "isaacgym", "skillmimic"]
+phc = ["cuda", "isaacgym", "phc"]
 
 [feature.cuda]
 system-requirements = { cuda = "12.1" }
 pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/cu124" ]
 
-[feature.cuda.pypi-dependencies]
-torch = "*"
-torchvision = "*"
+[feature.cuda.tasks]
+check-torch = { cmd = "python check_torch.py --cuda", cwd = "scripts" }
 
 [feature.isaacgym.tasks]
 joint-monkey = { cmd = "python joint_monkey.py", cwd = "isaacgym/python/examples" }
 
 [feature.isaacgym.pypi-dependencies]
 isaacgym = { path = "./isaacgym/python", editable = true }
+
+[feature.skillmimic.tasks]
+run = { cmd = "python run.py", cwd = "SkillMimic/skillmimic" }
+
+[feature.skillmimic.pypi-dependencies]
+# skillmimic = { path = "./isaacgym/python", editable = true }
+termcolor = "*"
+rl-games = "*"
+tensorboard = "*"
+protobuf = "*"
+
+[feature.phc.pypi-dependencies]

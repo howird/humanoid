@@ -3,6 +3,8 @@
 ###
 
 isaacgym/
+modules/
+workspaces/
 
 ###
 ### Python
@@ -174,3 +176,6 @@ cython_debug/
 # pixi environments
 .pixi
 *.egg-info
+
+# ruff linter
+.ruff_cache/
