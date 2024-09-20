@@ -16,7 +16,6 @@ matplotlib = "*"
 [environments]
 isaacgym = ["cuda", "isaacgym"]
 cuda = ["cuda"]
-rocm = ["rocm"]
 
 [feature.cuda]
 system-requirements = { cuda = "12.1" }
@@ -31,11 +30,3 @@ joint-monkey = { cmd = "python joint_monkey.py", cwd = "isaacgym/python/examples
 
 [feature.isaacgym.pypi-dependencies]
 isaacgym = { path = "./isaacgym/python", editable = true }
-
-[feature.rocm]
-# system-requirements = { rocm = "6.1" } DNE
-pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/rocm6.1" ]
-
-[feature.rocm.pypi-dependencies]
-torch = "*"
-torchvision = "*"
