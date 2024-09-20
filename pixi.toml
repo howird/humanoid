@@ -1,0 +1,43 @@
+[project]
+authors = ["Howard Nguyen-Huu <howardnguyenhuu@gmail.com>"]
+channels = ["conda-forge"]
+description = "experimenting with controllers for physics-simulated humanoids"
+name = "humanoid"
+platforms = ["linux-64"]
+version = "0.0.1"
+
+[dependencies]
+# python = "3.11.*"
+python = "3.8.*"
+# xorg-libx11 = "*"
+
+[pypi-dependencies]
+jupyterlab = "*"
+matplotlib = "*"
+
+[environments]
+isaacgym = ["cuda", "isaacgym"]
+cuda = ["cuda"]
+rocm = ["rocm"]
+
+[feature.cuda]
+system-requirements = { cuda = "12.1" }
+pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/cu124" ]
+
+[feature.cuda.pypi-dependencies]
+torch = "*"
+torchvision = "*"
+
+[feature.isaacgym]
+
+
+[feature.isaacgym.pypi-dependencies]
+isaacgym = { path = "./isaacgym/python", editable = true }
+
+[feature.rocm]
+# system-requirements = { rocm = "6.1" } DNE
+pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/rocm6.1" ]
+
+[feature.rocm.pypi-dependencies]
+torch = "*"
+torchvision = "*"
