@@ -32,6 +32,5 @@ pkgs.mkShell rec {
 
   shellHook = ''
     export LD_LIBRARY_PATH=$NIX_LD_LIBRARY_PATH
-    ${pkgs.pixi}/bin/pixi shell -e ${name}
   '';
 }
