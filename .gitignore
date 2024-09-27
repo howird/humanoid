@@ -2,9 +2,7 @@
 ### Project
 ###
 
-isaacgym/
-modules/
-workspaces/
+packages/isaacgym/
 .direnv/
 
 ###
