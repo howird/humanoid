@@ -1,6 +1,7 @@
 {pkgs ? import <nixpkgs> {}}:
 pkgs.mkShell rec {
-  name = "skillmimic";
+  name = "humanoid";
+
   packages = with pkgs; [
     cudatoolkit
     linuxPackages.nvidia_x11
@@ -10,10 +11,11 @@ pkgs.mkShell rec {
   ];
 
   PROJ_DIR = builtins.toString ./.;
-  ENV_DIR = "${PROJ_DIR}/.pixi/envs/${name}";
+  ENV_DIR = "${PROJ_DIR}/.pixi/envs/default";
 
   LIBRARIES = with pkgs; [
     stdenv.cc.cc
+    xorg.libX11
     linuxPackages.nvidia_x11
     "${ENV_DIR}"
     "${ENV_DIR}/lib/python3.8/site-packages/torch"

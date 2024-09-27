@@ -1,2 +1,2 @@
 [format]
-exclude = ["modules", ".pixi", "workspaces", "isaacgym"]
+exclude = ["packages/isaacgym", ".pixi"]

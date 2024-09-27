@@ -6,47 +6,31 @@ name = "humanoid"
 platforms = ["linux-64"]
 version = "0.0.1"
 
+[system-requirements]
+cuda = "12.1"
+
 [dependencies]
 python = "3.8.*"
 
 [pypi-dependencies]
+isaacgym = { path = "packages/isaacgym/python", editable = true }
 jupyterlab = "*"
 matplotlib = "*"
+protobuf = "*"
+ray = "*"
+rl-games = { path = "packages/rl_games", editable = true }
 ruff = "*"
+tensorboard = "*"
+termcolor = "*"
 torch = "*"
 torchvision = "*"
+
+[pypi-options]
+extra-index-urls = [ "https://download.pytorch.org/whl/cu124" ]
 
 [tasks]
 slint = "python -m ruff check"
 lint = "python -m ruff format"
-check-torch = { cmd = "python check_torch.py --cpu", cwd = "scripts" }
-
-[environments]
-cuda = ["cuda"]
-isaacgym = ["cuda", "isaacgym"]
-skillmimic = ["cuda", "isaacgym", "skillmimic"]
-phc = ["cuda", "isaacgym", "phc"]
-
-[feature.cuda]
-system-requirements = { cuda = "12.1" }
-pypi-options.extra-index-urls = [ "https://download.pytorch.org/whl/cu124" ]
-
-[feature.cuda.tasks]
 check-torch = { cmd = "python check_torch.py --cuda", cwd = "scripts" }
-
-[feature.isaacgym.tasks]
 joint-monkey = { cmd = "python joint_monkey.py", cwd = "packages/isaacgym/python/examples" }
-
-[feature.isaacgym.pypi-dependencies]
-isaacgym = { path = "packages/isaacgym/python", editable = true }
-
-[feature.skillmimic.tasks]
-run = { cmd = "python skillmimic/run.py", cwd = "projects" }
-
-[feature.skillmimic.pypi-dependencies]
-termcolor = "*"
-rl-games = "*"
-tensorboard = "*"
-protobuf = "*"
-
-[feature.phc.pypi-dependencies]
+skillmimic = { cmd = "python skillmimic/run.py", cwd = "projects" }
