@@ -41,13 +41,15 @@ joint-monkey = { cmd = "python joint_monkey.py", cwd = "isaacgym/python/examples
 isaacgym = { path = "./isaacgym/python", editable = true }
 
 [feature.skillmimic.tasks]
-run = { cmd = "python run.py", cwd = "SkillMimic/skillmimic" }
+run = { cmd = "python skillmimic/run.py", cwd = "SkillMimic" }
 
 [feature.skillmimic.pypi-dependencies]
 # skillmimic = { path = "./isaacgym/python", editable = true }
 termcolor = "*"
+# rl-games = "==1.1.4"
 rl-games = "*"
 tensorboard = "*"
 protobuf = "*"
 
 [feature.phc.pypi-dependencies]
+

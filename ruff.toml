@@ -1,2 +1,2 @@
 [format]
-extend-exclude = ["modules", ".pixi", "workspaces", "isaacgym"]
+exclude = ["modules", ".pixi", "workspaces", "isaacgym"]

@@ -5,6 +5,7 @@
 isaacgym/
 modules/
 workspaces/
+.direnv/
 
 ###
 ### Python
