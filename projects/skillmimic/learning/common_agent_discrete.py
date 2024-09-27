@@ -51,16 +51,16 @@ import learning.amp_datasets as amp_datasets
 from tensorboardX import SummaryWriter
 
 class CommonAgentDiscrete(a2c_discrete.DiscreteA2CAgent):
-    def __init__(self, base_name, config):
-        a2c_common.A2CBase.__init__(self, base_name, config)
+    def __init__(self, base_name, params):
+        a2c_common.A2CBase.__init__(self, base_name, params)
 
-        self._load_config_params(config)
+        self._load_config_params(params)
 
         self.is_discrete = True
         self._setup_action_space() #Z Take reference from class ContinuousA2CBase(A2CBase)
 
         #Z Remove action constraints
-        self._save_intermediate = config.get('save_intermediate', False)
+        self._save_intermediate = params.get('save_intermediate', False)
 
         net_config = self._build_net_config()
         self.model = self.network.build(net_config)

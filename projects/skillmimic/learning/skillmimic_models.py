@@ -30,19 +30,20 @@ import torch.nn as nn
 from rl_games.algos_torch.models import ModelA2CContinuousLogStd
 
 class SkillMimicModelContinuous(ModelA2CContinuousLogStd):
+    """ Wrapper of ModelA2CContinuousLogStd to add SkillMimic amp normalization """
     def __init__(self, network):
         super().__init__(network)
         return
 
-    def build(self, config):
-        net = self.network_builder.build('skillmimic', **config)
-        for name, _ in net.named_parameters():
-            print(name)
-        return SkillMimicModelContinuous.Network(net)
+    # def build(self, config):
+    #     net = self.network_builder.build('skillmimic', **config)
+    #     for name, _ in net.named_parameters():
+    #         print(name)
+    #     return SkillMimicModelContinuous.Network(net)
 
     class Network(ModelA2CContinuousLogStd.Network):
-        def __init__(self, a2c_network):
-            super().__init__(a2c_network)
+        def __init__(self, a2c_network, **kwargs):
+            super().__init__(a2c_network, **kwargs)
             return
 
         def forward(self, input_dict):

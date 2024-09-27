@@ -36,14 +36,14 @@ from rl_games.common.player import BasePlayer
 import numpy as np
 
 class CommonPlayerDiscrete(players.PpoPlayerDiscrete):
-    def __init__(self, config):
-        BasePlayer.__init__(self, config)
-        self.network = config['network']
+    def __init__(self, params):
+        BasePlayer.__init__(self, params)
+        self.network = params['network']
         
         self._setup_action_space()
         self.mask = [False]
 
-        self.normalize_input = self.config['normalize_input']
+        self.normalize_input = self.params['normalize_input']
 
         net_config = self._build_net_config()
         self._build_net(net_config)   
@@ -54,7 +54,7 @@ class CommonPlayerDiscrete(players.PpoPlayerDiscrete):
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
-        is_determenistic = self.is_determenistic
+        is_deterministic = self.is_deterministic
         sum_rewards = 0
         sum_steps = 0
         sum_game_res = 0
@@ -95,9 +95,9 @@ class CommonPlayerDiscrete(players.PpoPlayerDiscrete):
 
                 if has_masks:
                     masks = self.env.get_action_mask()
-                    action = self.get_masked_action(obs_dict, masks, is_determenistic)
+                    action = self.get_masked_action(obs_dict, masks, is_deterministic)
                 else:
-                    action = self.get_action(obs_dict, is_determenistic)
+                    action = self.get_action(obs_dict, is_deterministic)
                 obs_dict, r, done, info =  self.env_step(self.env, action)
                 cr += r
                 steps += 1
@@ -162,8 +162,8 @@ class CommonPlayerDiscrete(players.PpoPlayerDiscrete):
         }
         return obs_dict
 
-    def get_action(self, obs_dict, is_determenistic = False):
-        output = super().get_action(obs_dict['obs'], is_determenistic)
+    def get_action(self, obs_dict, is_deterministic = False):
+        output = super().get_action(obs_dict['obs'], is_deterministic)
         return output
 
     def env_step(self, env, actions):

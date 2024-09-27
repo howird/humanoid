@@ -484,7 +484,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/f4/24/2a3e3df732393fed8b3ebf2ec078f05546de641fe1b667ee316ec1dcf3b7/webencodings-0.5.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5a/84/44687a29792a70e111c5c477230a72c4b957d88d16141199bf9acb7537a3/websocket_client-1.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/62/8b/5ba542fa83c90e09eac972fc9baca7a88e7e7ca4b221a89251954019308b/zipp-3.20.2-py3-none-any.whl
-      - pypi: ./isaacgym/python
+      - pypi: packages/isaacgym/python
   phc:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -651,7 +651,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/f4/24/2a3e3df732393fed8b3ebf2ec078f05546de641fe1b667ee316ec1dcf3b7/webencodings-0.5.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5a/84/44687a29792a70e111c5c477230a72c4b957d88d16141199bf9acb7537a3/websocket_client-1.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/62/8b/5ba542fa83c90e09eac972fc9baca7a88e7e7ca4b221a89251954019308b/zipp-3.20.2-py3-none-any.whl
-      - pypi: ./isaacgym/python
+      - pypi: packages/isaacgym/python
   skillmimic:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -854,7 +854,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/4b/84/997bbf7c2bf2dc3f09565c6d0b4959fefe5355c18c4096cfd26d83e0785b/werkzeug-3.0.4-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1b/d1/9babe2ccaecff775992753d8686970b1e2755d21c8a63be73aba7a4e7d77/wheel-0.44.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/62/8b/5ba542fa83c90e09eac972fc9baca7a88e7e7ca4b221a89251954019308b/zipp-3.20.2-py3-none-any.whl
-      - pypi: ./isaacgym/python
+      - pypi: packages/isaacgym/python
 packages:
 - kind: conda
   name: _libgcc_mutex
@@ -1937,7 +1937,7 @@ packages:
 - kind: pypi
   name: isaacgym
   version: 1.0rc4
-  path: ./isaacgym/python
+  path: packages/isaacgym/python
   sha256: 03c0d3bb457469d22db3b071bc44414baff8787334fd28a41cf0f42b2129e10d
   requires_dist:
   - numpy>=1.16.4

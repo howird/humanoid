@@ -54,26 +54,26 @@ import learning.skillmimic_agent as skillmimic_agent
 from tensorboardX import SummaryWriter
 
 class HRLAgentDiscrete(common_agent_discrete.CommonAgentDiscrete):
-    def __init__(self, base_name, config):
-        with open(os.path.join(os.getcwd(), config['llc_config']), 'r') as f:
+    def __init__(self, base_name, params):
+        with open(os.path.join(os.getcwd(), params['llc_config']), 'r') as f:
             llc_config = yaml.load(f, Loader=yaml.SafeLoader)
             llc_config_params = llc_config['params']
 
-        self._latent_dim = config['latent_dim'] #Z0 #V1
-        self._control_mapping = config['control_mapping']
+        self._latent_dim = params['latent_dim'] #Z0 #V1
+        self._control_mapping = params['control_mapping']
         
-        self.delta_action = config['delta_action'] #ZC0
+        self.delta_action = params['delta_action'] #ZC0
 
-        super().__init__(base_name, config)
+        super().__init__(base_name, params)
 
         self._task_size = self.vec_env.env.task.get_task_obs_size()
         
-        self._llc_steps = config['llc_steps']
-        llc_checkpoint = config['llc_checkpoint']
+        self._llc_steps = params['llc_steps']
+        llc_checkpoint = params['llc_checkpoint']
         assert(llc_checkpoint != "")
         self._build_llc(llc_config_params, llc_checkpoint)
 
-        self.resume_from = config['resume_from']
+        self.resume_from = params['resume_from']
 
         return
 

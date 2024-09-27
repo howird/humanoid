@@ -44,28 +44,28 @@ import learning.skillmimic_network_builder as skillmimic_network_builder
 import learning.skillmimic_players as skillmimic_players
 
 class HRLPlayerDiscrete(common_player_discrete.CommonPlayerDiscrete):
-    def __init__(self, config):
-        with open(os.path.join(os.getcwd(), config['llc_config']), 'r') as f:
+    def __init__(self, params):
+        with open(os.path.join(os.getcwd(), params['llc_config']), 'r') as f:
             llc_config = yaml.load(f, Loader=yaml.SafeLoader)
             llc_config_params = llc_config['params']
 
-        self._latent_dim = config['latent_dim'] #Z0 #V1
-        self._control_mapping = config['control_mapping']
+        self._latent_dim = params['latent_dim'] #Z0 #V1
+        self._control_mapping = params['control_mapping']
         
-        self.delta_action = config['delta_action'] #ZC0
+        self.delta_action = params['delta_action'] #ZC0
 
-        super().__init__(config)
+        super().__init__(params)
         
         self._task_size = self.env.task.get_task_obs_size()
         
-        self._llc_steps = config['llc_steps']
-        llc_checkpoint = config['llc_checkpoint']
+        self._llc_steps = params['llc_steps']
+        llc_checkpoint = params['llc_checkpoint']
         assert(llc_checkpoint != "")
         self._build_llc(llc_config_params, llc_checkpoint)
         
         return
     
-    def get_action(self, obs_dict, is_determenistic = False):
+    def get_action(self, obs_dict, is_deterministic = False):
         obs = obs_dict['obs']
 
         if len(obs.size()) == len(self.obs_shape):
@@ -82,7 +82,7 @@ class HRLPlayerDiscrete(common_player_discrete.CommonPlayerDiscrete):
         # mu = res_dict['mus']
         action = res_dict['actions']
         self.states = res_dict['rnn_states']
-        if is_determenistic:
+        if is_deterministic:
             logits = res_dict['logits']
             action_masks = input_dict.get('action_masks', None)
             if action_masks is not None:
@@ -101,7 +101,7 @@ class HRLPlayerDiscrete(common_player_discrete.CommonPlayerDiscrete):
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
-        is_determenistic = self.is_determenistic
+        is_deterministic = self.is_deterministic
         sum_rewards = 0
         sum_steps = 0
         sum_game_res = 0
@@ -144,9 +144,9 @@ class HRLPlayerDiscrete(common_player_discrete.CommonPlayerDiscrete):
 
                 if has_masks:
                     masks = self.env.get_action_mask()
-                    action = self.get_masked_action(obs_dict, masks, is_determenistic)
+                    action = self.get_masked_action(obs_dict, masks, is_deterministic)
                 else:
-                    action = self.get_action(obs_dict, is_determenistic)
+                    action = self.get_action(obs_dict, is_deterministic)
                 obs_dict, r, done, info = self.env_step(self.env, obs_dict, action)
                 cr += r
                 steps += 1

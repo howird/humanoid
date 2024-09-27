@@ -41,6 +41,10 @@ class SkillMimicBuilder(network_builder.A2CBuilder):
         super().__init__(**kwargs)
         return
 
+    def build(self, name, **kwargs):
+        net = SkillMimicBuilder.Network(self.params, **kwargs)
+        return net
+
     class Network(network_builder.A2CBuilder.Network):
         def __init__(self, params, **kwargs):
             super().__init__(params, **kwargs)
@@ -104,12 +108,15 @@ class SkillMimicBuilder(network_builder.A2CBuilder):
             return output
 
         def eval_actor(self, obs, cls_latents=None): #ZC0
-            if  cls_latents is not None:
+            if cls_latents is not None:
                 _, indices = torch.max(cls_latents, dim=-1)
                 obs[torch.arange(obs.size(0)), -64 + indices] = 1.
+
             a_out = self.actor_cnn(obs)
+
             if(type(a_out) == dict): #ZC9
                 a_out = a_out['obs']
+
             a_out = a_out.contiguous().view(a_out.size(0), -1)
             a_out = self.actor_mlp(a_out)
 
@@ -131,7 +138,7 @@ class SkillMimicBuilder(network_builder.A2CBuilder):
             # a_out = self.decoder(
             #     torch.cat((z,a_out[:,:823]),dim=-1)
             # )
-                     
+
             if self.is_discrete:
                 logits = self.logits(a_out)
                 return logits
@@ -152,16 +159,11 @@ class SkillMimicBuilder(network_builder.A2CBuilder):
 
         def eval_critic(self, obs):
             c_out = self.critic_cnn(obs)
+
             if(type(c_out) == dict): #ZC9
                 c_out = c_out['obs']
+
             c_out = c_out.contiguous().view(c_out.size(0), -1)
             c_out = self.critic_mlp(c_out)              
             value = self.value_act(self.value(c_out))
             return value
-
-    def build(self, name, **kwargs):
-        net = SkillMimicBuilder.Network(self.params, **kwargs)
-        return net
-
-
-

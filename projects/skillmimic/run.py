@@ -32,11 +32,17 @@ import os
 from utils.config import set_np_formatting, set_seed, get_args, parse_sim_params, load_cfg
 from utils.parse_task import parse_task
 
-from rl_games.algos_torch import players
-from rl_games.algos_torch import torch_ext
+from rl_games.algos_torch import torch_ext, players, model_builder
 from rl_games.common import env_configurations, experiment, vecenv
 from rl_games.common.algo_observer import AlgoObserver
 from rl_games.torch_runner import Runner
+from rl_games.algos_torch.models import ModelA2CContinuousLogStd
+
+import debugpy
+debugpy.listen(5678)
+print("Waiting for debugger attach")
+debugpy.wait_for_client()
+
 
 import numpy as np
 import copy
@@ -188,33 +194,36 @@ env_configurations.register('rlgpu', {
 
 def build_alg_runner(algo_observer):
     runner = Runner(algo_observer)
+    builder = model_builder.ModelBuilder()
 
-    runner.algo_factory.register_builder('skillmimic', lambda **kwargs : skillmimic_agent.SkillMimicAgent(**kwargs))
+    # runner.algo_factory.register_builder('skillmimic', lambda **kwargs : skillmimic_agent.SkillMimicAgent(**kwargs))
     runner.player_factory.register_builder('skillmimic', lambda **kwargs : skillmimic_players.SkillMimicPlayerContinuous(**kwargs))
-    runner.model_builder.model_factory.register_builder('skillmimic', lambda network, **kwargs : skillmimic_models.SkillMimicModelContinuous(network))  
-    runner.model_builder.network_factory.register_builder('skillmimic', lambda **kwargs : skillmimic_network_builder.SkillMimicBuilder())
-    # runner.model_builder.network_factory.register_builder('physhoi_dual', lambda **kwargs : physhoi_network_builder_dual.PhysHOIBuilderDual()) #ZC9 #V1
+
+    builder.model_factory.register_builder('skillmimic', lambda network, **kwargs : skillmimic_models.SkillMimicModelContinuous(network))  
+    builder.network_builder.network_factory.register_builder('skillmimic', lambda **kwargs : skillmimic_network_builder.SkillMimicBuilder())
+    # builder.network_builder.network_factory.register_builder('physhoi_dual', lambda **kwargs : physhoi_network_builder_dual.PhysHOIBuilderDual()) #ZC9 #V1
 
     # runner.algo_factory.register_builder('hrl', lambda **kwargs : hrl_agent.HRLAgent(**kwargs)) #ZC0
     runner.algo_factory.register_builder('hrl_discrete', lambda **kwargs : hrl_agent_discrete.HRLAgentDiscrete(**kwargs)) #ZC0
     # runner.player_factory.register_builder('hrl', lambda **kwargs : hrl_players.HRLPlayer(**kwargs))
     runner.player_factory.register_builder('hrl_discrete', lambda **kwargs : hrl_players_discrete.HRLPlayerDiscrete(**kwargs))
     # runner.player_factory.register_builder('hrl_discrete_llcs', lambda **kwargs : hrl_players_discrete_llcs.HRLPlayerDiscreteLLCs(**kwargs))
-    # runner.model_builder.model_factory.register_builder('hrl', lambda network, **kwargs : hrl_models.ModelHRLContinuous(network))  
-    runner.model_builder.model_factory.register_builder('hrl_discrete', lambda network, **kwargs : hrl_models_discrete.ModelHRLDiscrete(network))  
-    runner.model_builder.network_factory.register_builder('hrl', lambda **kwargs : hrl_network_builder.HRLBuilder())
+    # builder.model_factory.register_builder('hrl', lambda network, **kwargs : hrl_models.ModelHRLContinuous(network))  
+    builder.model_factory.register_builder('hrl_discrete', lambda network, **kwargs : hrl_models_discrete.ModelHRLDiscrete(network))  
+    builder.network_builder.network_factory.register_builder('hrl', lambda **kwargs : hrl_network_builder.HRLBuilder())
 
     # runner.algo_factory.register_builder('amp', lambda **kwargs : amp_agent.AMPAgent(**kwargs))
     # runner.player_factory.register_builder('amp', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
-    # runner.model_builder.model_factory.register_builder('amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))  
-    # runner.model_builder.network_factory.register_builder('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
+    # builder.model_factory.register_builder('amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))  
+    # builder.network_builder.network_factory.register_builder('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
 
     # runner.algo_factory.register_builder('ase', lambda **kwargs : ase_agent.ASEAgent(**kwargs))
     # runner.player_factory.register_builder('ase', lambda **kwargs : ase_players.ASEPlayer(**kwargs))
-    # runner.model_builder.model_factory.register_builder('ase', lambda network, **kwargs : ase_models.ModelASEContinuous(network))  
-    # runner.model_builder.network_factory.register_builder('ase', lambda **kwargs : ase_network_builder.ASEBuilder())
- 
+    # builder.model_factory.register_builder('ase', lambda network, **kwargs : ase_models.ModelASEContinuous(network))  
+    # builder.network_builder.network_factory.register_builder('ase', lambda **kwargs : ase_network_builder.ASEBuilder())
+
     return runner
+
 
 def main():
     global args

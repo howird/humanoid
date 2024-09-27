@@ -39,25 +39,24 @@ from rl_games.common.player import BasePlayer
 import numpy as np
 
 class CommonPlayer(players.PpoPlayerContinuous):
-    def __init__(self, config):
-        BasePlayer.__init__(self, config)
-        self.network = config['network']
-        
+    def __init__(self, params):
+        BasePlayer.__init__(self, params)
         self._setup_action_space()
+
         self.mask = [False]
 
         self.normalize_input = self.config['normalize_input']
 
         net_config = self._build_net_config()
         self._build_net(net_config)   
-        
+
         return
 
     def run(self):
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
-        is_determenistic = self.is_determenistic
+        is_deterministic = self.is_deterministic
         sum_rewards = 0
         sum_steps = 0
         sum_game_res = 0
@@ -98,9 +97,9 @@ class CommonPlayer(players.PpoPlayerContinuous):
 
                 if has_masks:
                     masks = self.env.get_action_mask()
-                    action = self.get_masked_action(obs_dict, masks, is_determenistic)
+                    action = self.get_masked_action(obs_dict, masks, is_deterministic)
                 else:
-                    action = self.get_action(obs_dict, is_determenistic)
+                    action = self.get_action(obs_dict, is_deterministic)
                 obs_dict, r, done, info =  self.env_step(self.env, action)
                 cr += r
                 steps += 1
@@ -165,8 +164,8 @@ class CommonPlayer(players.PpoPlayerContinuous):
         }
         return obs_dict
 
-    def get_action(self, obs_dict, is_determenistic = False):
-        output = super().get_action(obs_dict['obs'], is_determenistic)
+    def get_action(self, obs_dict, is_deterministic = False):
+        output = super().get_action(obs_dict['obs'], is_deterministic)
         return output
 
     def env_step(self, env, actions):
@@ -186,15 +185,16 @@ class CommonPlayer(players.PpoPlayerContinuous):
                 dones = np.expand_dims(np.asarray(dones), 0)
             return self.obs_to_torch(obs), torch.from_numpy(rewards), torch.from_numpy(dones), infos
 
-    def _build_net(self, config):
-        self.model = self.network.build(config)
+    def _build_net(self, net_config):
+        self.model = self.config['network'].build(net_config)
         self.model.to(self.device)
         self.model.eval()
         self.is_rnn = self.model.is_rnn()
-        if self.normalize_input:
-            obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
-            self.running_mean_std = RunningMeanStd(obs_shape).to(self.device)
-            self.running_mean_std.eval() 
+
+        # if self.normalize_input:
+        #     obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
+        #     self.running_mean_std = RunningMeanStd(obs_shape).to(self.device)
+        #     self.running_mean_std.eval()
 
         # fid.hook = self.model.a2c_network.actor_mlp.register_forward_hook(fid.hook_fn) #fid #V1
         return
@@ -209,12 +209,15 @@ class CommonPlayer(players.PpoPlayerContinuous):
 
     def _build_net_config(self):
         obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
-        config = {
+        net_config = {
             'actions_num' : self.actions_num,
             'input_shape' : obs_shape,
-            'num_seqs' : self.num_agents
+            'num_seqs' : self.num_agents,
+            'normalize_input': self.config.get('normalize_input', False),
+            'normalize_value': self.config.get('normalize_value', False),
+            # 'normalize_amp_input': self.config.get('normalize_amp_input', True)
         } 
-        return config
+        return net_config
 
     def _setup_action_space(self):
         self.actions_num = self.action_space.shape[0] 

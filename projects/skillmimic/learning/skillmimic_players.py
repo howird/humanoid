@@ -39,22 +39,21 @@ import learning.common_player as common_player
 METRIC = False
 
 class SkillMimicPlayerContinuous(common_player.CommonPlayer):
-    def __init__(self, config):
-        self._normalize_amp_input = config.get('normalize_amp_input', True)
+    def __init__(self, params):
+        self._normalize_amp_input = params.get('normalize_amp_input', True)
         
-        super().__init__(config)
+        super().__init__(params)
 
         #ZC9
-        if config.get('dual', False):
+        if params.get('dual', False):
             print("-----------Dual Policy-----------")
-        return
 
     def run(self):
 
         n_games = self.games_num #Z
         render = self.render_env
         n_game_life = self.n_game_life
-        is_determenistic = self.is_determenistic
+        is_deterministic = self.is_deterministic
         sum_rewards = 0
         sum_steps = 0
         sum_game_res = 0
@@ -128,9 +127,9 @@ class SkillMimicPlayerContinuous(common_player.CommonPlayer):
 
                     if has_masks:
                         masks = self.env.get_action_mask()
-                        action = self.get_masked_action(obs_dict, masks, is_determenistic)
+                        action = self.get_masked_action(obs_dict, masks, is_deterministic)
                     else:
-                        action = self.get_action(obs_dict, is_determenistic)
+                        action = self.get_action(obs_dict, is_deterministic)
 
                     # a_out = fid.g_a_out #fid #V1
                     # hidden_sim.append(a_out)
@@ -306,17 +305,18 @@ class SkillMimicPlayerContinuous(common_player.CommonPlayer):
 
         if (fn != 'Base'):
             super().restore(fn)
-            if self._normalize_amp_input:
-                checkpoint = torch_ext.load_checkpoint(fn)
-                self._amp_input_mean_std.load_state_dict(checkpoint['amp_input_mean_std'])
+
+            # if self._normalize_amp_input:
+            #     checkpoint = torch_ext.load_checkpoint(fn)
+            #     self._amp_input_mean_std.load_state_dict(checkpoint['amp_input_mean_std'])
         return
     
     def _build_net(self, config):
         super()._build_net(config)
         
-        if self._normalize_amp_input:
-            self._amp_input_mean_std = RunningMeanStd(config['amp_input_shape']).to(self.device)
-            self._amp_input_mean_std.eval()  
+        # if self._normalize_amp_input:
+        #     self._amp_input_mean_std = RunningMeanStd(config['amp_input_shape']).to(self.device)
+        #     self._amp_input_mean_std.eval()
         
         return
 
@@ -336,5 +336,3 @@ class SkillMimicPlayerContinuous(common_player.CommonPlayer):
 
     def _amp_debug(self, info):
         return
-
-

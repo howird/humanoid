@@ -51,18 +51,19 @@ import learning.amp_datasets as amp_datasets
 from tensorboardX import SummaryWriter
 
 class CommonAgent(a2c_continuous.A2CAgent):
-    def __init__(self, base_name, config):
-        a2c_common.A2CBase.__init__(self, base_name, config)
+    def __init__(self, base_name, params):
+        a2c_common.A2CBase.__init__(self, base_name, params)
 
-        self._load_config_params(config)
+        self._load_config_params(params)
 
         self.is_discrete = False
         self._setup_action_space()
-        self.bounds_loss_coef = config.get('bounds_loss_coef', None)
-        self.clip_actions = config.get('clip_actions', True)
-        self._save_intermediate = config.get('save_intermediate', False)
+        self.bounds_loss_coef = params.get('bounds_loss_coef', None)
+        self.clip_actions = params.get('clip_actions', True)
+        self._save_intermediate = params.get('save_intermediate', False)
 
         net_config = self._build_net_config()
+        # TODO(howird): update
         self.model = self.network.build(net_config) # self.network <learning.hrl_models.ModelHRLContinuous object at 0x...>
         self.model.to(self.ppo_device)
         self.states = None
@@ -496,8 +497,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
     def _get_mean_rewards(self):
         return self.game_rewards.get_mean()
 
-    def _load_config_params(self, config):
-        self.last_lr = config['learning_rate']
+    def _load_config_params(self, params):
+        self.last_lr = params['learning_rate']
         return
 
     def _build_net_config(self):

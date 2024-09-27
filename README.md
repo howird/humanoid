@@ -28,5 +28,5 @@ pixi run -e skillmimic run --test --task SkillMimicBallPlay --num_envs 16 \
   --cfg_env skillmimic/data/cfg/skillmimic.yaml \
   --cfg_train skillmimic/data/cfg/train/rlg/skillmimic.yaml \
   --motion_file skillmimic/data/motions/BallPlay-M/layup \
-  --checkpoint skillmimic/data/models/mixedskills/nn/skillmimic_llc.pth
+  --checkpoint skillmimic/data/models/mixedskills/nn/skillmimic_llc_new.pth
 ```
