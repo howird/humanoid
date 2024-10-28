@@ -1,0 +1,10 @@
+cmake
+curl
+git
+git-lfs
+libcurl4-openssl-dev
+libgl1
+lsof
+neovim
+wget
+x11-apps

@@ -1,0 +1,43 @@
+services:
+  humanoid:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        USER_ID: ${USER_ID:?}
+        GROUP_ID: ${GROUP_ID:?}
+        SHARED_GROUP_ID: ${SHARED_GROUP_ID}
+        DOCKER_USERNAME: ${DOCKER_USERNAME:?}
+        PROJECT_NAME: ${PROJECT_NAME:?}
+    image: ${USERNAME:?}/${PROJECT_NAME:?}
+    user: ${USER_ID:?}:${GROUP_ID:?}
+    volumes:
+      - .:/${PROJECT_NAME:?}
+      - ${DATASET_PATH:-/dev/null}:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # isaac-sim related volumes
+      # - ./.isaac-sim/cache/kit:/isaac-sim/kit/cache
+      # - ./.isaac-sim/cache/ov:/home/${DOCKER_USERNAME}/.cache/ov
+      # - ./.isaac-sim/cache/pip:/home/${DOCKER_USERNAME}/.cache/pip
+      # - ./.isaac-sim/cache/warp:/home/${DOCKER_USERNAME}/.cache/warp
+      # - ./.isaac-sim/cache/glcache:/home/${DOCKER_USERNAME}/.cache/nvidia/GLCache
+      # - ./.isaac-sim/cache/computecache:/home/${DOCKER_USERNAME}/.nv/ComputeCache
+      # - ./.isaac-sim/cache/omni-pycache:/home/${DOCKER_USERNAME}/.nvidia-omniverse/pycache
+      # - ./.isaac-sim/logs:/home/${DOCKER_USERNAME}/.nvidia-omniverse/logs
+      # - ./.isaac-sim/documents:/home/${DOCKER_USERNAME}/Documents
+      # - ./.isaac-sim/local:/home/${DOCKER_USERNAME}/.local
+    environment:
+    #   - ACCEPT_EULA=Y
+    #   - PRIVACY_CONSENT=Y
+      - DISPLAY=${DISPLAY}
+    network_mode: "host"
+    ipc: host
+    tty: True
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
