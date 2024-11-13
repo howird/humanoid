@@ -38,12 +38,6 @@ from rl_games.common.algo_observer import AlgoObserver
 from rl_games.torch_runner import Runner
 from rl_games.algos_torch.models import ModelA2CContinuousLogStd
 
-import debugpy
-debugpy.listen(5678)
-print("Waiting for debugger attach")
-debugpy.wait_for_client()
-
-
 import numpy as np
 import copy
 import torch
@@ -141,7 +135,6 @@ class RLGPUAlgoObserver(AlgoObserver):
 class RLGPUEnv(vecenv.IVecEnv):
     def __init__(self, config_name, num_actors, **kwargs):
         self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
-        # pdb.set_trace()
         self.use_global_obs = (self.env.num_states > 0)
 
         self.full_state = {}

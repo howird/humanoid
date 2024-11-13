@@ -183,6 +183,13 @@ def parse_sim_params(args, cfg, cfg_train):
     return sim_params
 
 
+def debugger(port=5678):
+    import debugpy
+    debugpy.listen(port)
+    print(f"Waiting for debugger attach to port: {port}")
+    debugpy.wait_for_client()
+
+
 def get_args(benchmark=False):
     custom_parameters = [
         {"name": "--test", "action": "store_true", "default": False,
@@ -256,6 +263,8 @@ def get_args(benchmark=False):
             "help": "Specify the checkpoint to continue training"},
         {"name": "--state_init", "type": str, "default": "Random", 
             "help": "Specify a specific initialization frame and disable random initialization. Or Random Reference State Init"},
+        {"name": "--debugpy", "action": "store_true", "default": False,
+            "help": "Run debugpy for debugging"},
     ]
 
     if benchmark:
@@ -282,5 +291,8 @@ def get_args(benchmark=False):
         args.train = False
     else:
         args.train = True
+    
+    if args.debugpy:
+        debugger()
 
     return args
