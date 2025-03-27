@@ -4,15 +4,24 @@
 , mkShell
 , python310
 }:
-mkShell rec {
-  packages = (with pkgs; [
+let
+  base-packages = with pkgs; [
     uv
+
+    # isaaclab
+    libxcrypt-legacy
 
     # mujoco
     libGL
     glfw
     glm
-  ]) ++ (lib.optionals config.cudaSupport (with pkgs.cudaPackages; [
+    xorg.libX11
+    xorg.libXt
+    xorg.xrandr
+  ];
+in
+mkShell rec {
+  packages = base-packages ++ (lib.optionals config.cudaSupport (with pkgs.cudaPackages; [
     cuda_cudart
     # cuda_nvcc
     cuda_cupti
