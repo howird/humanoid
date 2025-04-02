@@ -54,10 +54,11 @@ class IsaacGymBase:
         assert physics_engine == gymapi.SIM_PHYSX, "Only PhysX is supported"
         assert device_type in ["cpu", "cuda"], "Device type must be cpu or cuda"
 
+        compute_device = -1
         if device_type == "cuda":
             assert torch.cuda.is_available(), "CUDA is not available"
-        self.device = "cuda" + ":" + str(device_id) if device_type == "cuda" else "cpu"
-        compute_device = -1 if "cuda" not in self.device else device_id
+            compute_device = device_id
+
         graphics_device = -1 if headless else compute_device
 
         # Sim params: keep these hardcoded here for now
@@ -67,7 +68,7 @@ class IsaacGymBase:
         self.control_freq_inv = control_freq_inv
         self.dt = self.control_freq_inv * sim_params.dt
 
-        sim_params.use_gpu_pipeline = "cuda" in self.device
+        sim_params.use_gpu_pipeline = device_type == "cuda"
         sim_params.num_client_threads = 0
 
         sim_params.physx.num_threads = 4
@@ -80,7 +81,7 @@ class IsaacGymBase:
         sim_params.physx.max_depenetration_velocity = 10.0
         sim_params.physx.default_buffer_size_multiplier = 10.0
 
-        sim_params.physx.use_gpu = "cuda" in self.device
+        sim_params.physx.use_gpu = device_type == "cuda"
         sim_params.physx.max_gpu_contact_pairs = 8 * 1024 * 1024
         sim_params.physx.num_subscenes = 0
 
@@ -109,6 +110,10 @@ class IsaacGymBase:
             cam_pos = gymapi.Vec3(20.0, 25.0, 3.0)
             cam_target = gymapi.Vec3(10.0, 15.0, 0.0)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
+
+    @property
+    def device(self) -> str:
+        return "cpu" if self.device_type == "cpu" else f"cuda:{self.device_id}"
 
     def reset(self):
         pass
