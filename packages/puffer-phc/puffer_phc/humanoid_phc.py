@@ -58,8 +58,8 @@ class IsaacGymBase:
         if device_type == "cuda":
             assert torch.cuda.is_available(), "CUDA is not available"
             compute_device = device_id
-
         graphics_device = -1 if headless else compute_device
+        self.device = "cpu" if device_type == "cpu" else f"{device_type}:{device_id}"
 
         # Sim params: keep these hardcoded here for now
         sim_params = gymapi.SimParams()
@@ -111,9 +111,6 @@ class IsaacGymBase:
             cam_target = gymapi.Vec3(10.0, 15.0, 0.0)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
-    @property
-    def device(self) -> str:
-        return "cpu" if self.device_type == "cpu" else f"cuda:{self.device_id}"
 
     def reset(self):
         pass

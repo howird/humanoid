@@ -13,48 +13,33 @@ This repo implements only the single primitive model, which can perform 99.0% of
 ## Getting Started
 
 1. Clone this repository. 
-    ```
-    git clone https://github.com/kywch/puffer-phc.git
-    ```
-    Then, go to the cloned directory.
-    ```
-    cd puffer-phc
-    ```
+```
+git clone https://github.com/kywch/puffer-phc.git
+```
 
-2. Using pixi, setup the virutal environment and install the dependencies. Install pixi, if you haven't already. See [pixi documentation](https://pixi.sh/latest/#installation) for more details. The following command is for linux.
-    ```
-    curl -fsSL https://pixi.sh/install.sh | bash
-    ```
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
 
-    The following command installs the dependencies and activate the virtual environment:
-    ```
-    pixi shell
-    ```
+3. Download and unzip Isaac Gym from [here](https://developer.nvidia.com/isaac-gym) to the root of this repo: `puffer-phc/isaacgym`
 
-3. Install Isaac Gym and gymtorch. Download and unzip Isaac Gym from [here](https://developer.nvidia.com/isaac-gym). Then. install isaacgym by running the following command inside the virtual environment:
-    ```
-    cd <isaac gym directory>/python
-    pip install -e .
-    ```
+4. Create, activate, and sync your uv virtualenv
 
-    Also, install gymtorch by running the following command inside the repository directory:
-    ```
-    pixi run build_gymtorch
-    ```
-    This gymtorch allows you to debug the isaac gym env inside VSCode.
-    
+```
+uv venv
+source .venv/bin/activate
+uv sync
+```
 
-    You can test if the installation is successful by running:
-    ```
-    pixi run test_deps
-    ```
+5. Install gymtorch by running the following command inside the repository directory:
+```
+cd gymtorch && python setup.py clean && python setup.py develop
+```
 
-4. Download the SMPL parameters from [SMPL](https://smpl.is.tue.mpg.de/), and unzip them into `smpl` folder. Rename the files `basicmodel_neutral_lbs_10_207_0_v1.1.0`, `basicmodel_m_lbs_10_207_0_v1.1.0.pkl`, `basicmodel_f_lbs_10_207_0_v1.1.0.pkl` to `SMPL_NEUTRAL.pkl`, `SMPL_MALE.pkl` and `SMPL_FEMALE.pkl`.
+6. Download the SMPL parameters from [SMPL](https://smpl.is.tue.mpg.de/), and unzip them into `smpl` folder. Rename the files `basicmodel_neutral_lbs_10_207_0_v1.1.0`, `basicmodel_m_lbs_10_207_0_v1.1.0.pkl`, `basicmodel_f_lbs_10_207_0_v1.1.0.pkl` to `SMPL_NEUTRAL.pkl`, `SMPL_MALE.pkl` and `SMPL_FEMALE.pkl`.
 
-5. Train a policy. In the virtual environment, run:
-    ```
-    python scripts/train.py --config config.ini -m <MOTION FILE PATH>
-    ```
+7. Train a policy. In the virtual environment, run:
+```
+python scripts/train.py --env.motion_file <MOTION FILE PATH>
+```
 
     The script supports wandb logging. To use wandb, log in to wandb, then add `--track` to the command.
 
@@ -97,3 +82,12 @@ This repository is built on top of the following amazing repositories:
 * Sample motion data is from: [CMU Motion Capture Dataset](http://mocap.cs.cmu.edu/), Subject 5, Motion 6 
 
 Please follow the license of the above repositories for usage.
+
+# TODO(howird)
+
+```
+test_deps = "python -c 'import isaacgym, torch; print(torch.cuda.is_available())'"
+# build gymtorch here, so that vscode debugging can be used
+build_gymtorch = ""
+```
+

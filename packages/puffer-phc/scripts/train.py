@@ -7,7 +7,7 @@ import math
 import json
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any, List, Literal
+from typing import Optional, Dict, Any, Literal
 from datetime import datetime
 
 import joblib
@@ -35,6 +35,14 @@ class DeviceConfig:
     device_type: Literal["cpu", "cuda"] = "cuda"
     device_id: int = 0
 
+    @property
+    def device(self) -> str:
+        """
+        NOTE: dataclass will no be aware of this property.
+        To do so, add: `device: str = field(init=False)` to the child dataclass
+        """
+        return "cpu" if self.device_type == "cpu" else f"cuda:{self.device_id}"
+
 
 @dataclass
 class EnvConfig(DeviceConfig):
@@ -56,7 +64,7 @@ class EnvConfig(DeviceConfig):
 @dataclass
 class PolicyConfig:
     """Policy configuration"""
-    input_size: int = 512
+    hidden_size: int = 512
 
 
 @dataclass
@@ -107,9 +115,8 @@ class TrainConfig(DeviceConfig):
     bound_coef: float = 10.0
     l2_reg_coef: float = 0.0
 
-    @property
-    def device(self) -> str:
-        return "cpu" if self.device_type == "cpu" else f"cuda:{self.device_id}"
+    # register inherited DeviceConfig.device with dataclasses
+    device: str = field(init=False)
 
 
 @dataclass
