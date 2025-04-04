@@ -1,8 +1,6 @@
 # Artifacts
-.pixi/
 experiments/
 output/
-pixi.lock
 wandb/
 data/
 smpl/*

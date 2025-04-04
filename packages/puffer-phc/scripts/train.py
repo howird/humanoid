@@ -26,7 +26,8 @@ import pufferlib.cleanrl
 import pufferlib.vector
 
 from puffer_phc import clean_pufferl
-from puffer_phc.environment import make as env_creator
+from puffer_phc.env_pufferl import make as env_creator
+from puffer_phc.envs.humanoid_phc import HumanoidPHC
 import puffer_phc.policy as policy_module
 
 from puffer_phc.config import EnvConfig, PolicyConfig, RNNConfig, TrainConfig
@@ -40,15 +41,16 @@ class DebugConfig:
     def __call__(self):
         if self.enable:
             import debugpy
+
             debugpy.listen(self.port)
             print(f"Waiting for debugger attach to port: {self.port}")
             debugpy.wait_for_client()
-    
 
 
 @dataclass
 class AppConfig:
     """Application configuration"""
+
     policy_name: str = "PHCPolicy"
     rnn_name: Optional[str] = None
     mode: Literal["train", "play", "eval", "sweep"] = "train"
@@ -58,7 +60,7 @@ class AppConfig:
     ssc_lr: float = 0.0001
     skip_resample: bool = False
     final_eval: bool = False
-    
+
     # Configuration sections
     env: EnvConfig = field(default_factory=EnvConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
@@ -70,9 +72,9 @@ class AppConfig:
 
 class EvalStats:
     def __init__(self, vec_env, failed_save_path=None):
-        self.task_env = vec_env.env
-        self.num_envs = self.task_env.num_envs
-        device = self.task_env.device
+        self.task_env: HumanoidPHC = vec_env.env
+        self.num_envs = self.task_env.cfg.num_envs
+        device = self.task_env.cfg.device
         self.failed_save_path = failed_save_path
 
         # Prep the env for evaluation
@@ -207,7 +209,10 @@ class EvalStats:
         print("------------------------------------------")
         print(f"Success Rate: {self.success_rate:.10f}")
         print("All: ", " \t".join([f"{k}: {v:.3f}" for k, v in metrics_all_print.items()]))
-        print("Succ: ", " \t".join([f"{k}: {v:.3f}" for k, v in metrics_succ_print.items()]))
+        print(
+            "Succ: ",
+            " \t".join([f"{k}: {v:.3f}" for k, v in metrics_succ_print.items()]),
+        )
         print("Failed keys: ", len(self.failed_keys), ",", self.failed_keys)
 
         self.results = {
@@ -252,13 +257,13 @@ class EvalStats:
 
 def make_policy(env, args: AppConfig):
     """Creates pufferlib policy, checking whether to use RNN based AppConfig.r"""
+    policy_cls = getattr(policy_module, args.policy_name)
+    policy = policy_cls(env, **asdict(args.policy))
     if args.rnn_name:
         rnn_cls = getattr(policy_module, args.rnn_name)
         policy = rnn_cls(env, policy, **asdict(args.rnn))
         policy = pufferlib.cleanrl.RecurrentPolicy(policy)
     else:
-        policy_cls = getattr(policy_module, args.policy_name)
-        policy = policy_cls(env, **asdict(args.policy))
         policy = pufferlib.cleanrl.Policy(policy)
 
     return policy.to(args.train.device)
@@ -280,14 +285,25 @@ def init_wandb(args: AppConfig, name, resume=True):
     return wandb, exp_id
 
 
-def train(args: AppConfig, vec_env, policy, wandb=None, exp_id=None, skip_resample=False, final_eval=False):
+def train(
+    args: AppConfig,
+    vec_env,
+    policy,
+    wandb=None,
+    exp_id=None,
+    skip_resample=False,
+    final_eval=False,
+):
     if wandb is None and args.track:
         wandb, exp_id = init_wandb(args, args.env.name)
 
     if exp_id is None:
         exp_id = args.env.name + "-" + str(uuid.uuid4())[:8]
 
-    train_config = pufferlib.namespace(**asdict(args.train), env=args.env.name, exp_id=exp_id)
+    train_config: TrainConfig = args.train
+    train_config.env = args.env.name
+    train_config.exp_id = exp_id
+
     data = clean_pufferl.create(train_config, vec_env, policy, wandb=wandb)
 
     data_dir = os.path.join(train_config.data_dir, exp_id)
@@ -297,7 +313,10 @@ def train(args: AppConfig, vec_env, policy, wandb=None, exp_id=None, skip_resamp
         if not skip_resample and data.epoch > 0 and data.epoch % train_config.motion_resample_interval == 0:
             # Evaluate the model every 600 epochs (train_config.checkpoint_interval)
             if data.epoch % train_config.checkpoint_interval == 0:
-                eval_stats = EvalStats(vec_env, failed_save_path=os.path.join(data_dir, f"failed_{data.epoch:06d}.pkl"))
+                eval_stats = EvalStats(
+                    vec_env,
+                    failed_save_path=os.path.join(data_dir, f"failed_{data.epoch:06d}.pkl"),
+                )
                 rollout(vec_env, policy, eval_stats)
                 eval_results = eval_stats.update_env_and_close()
                 if data.wandb:
@@ -373,7 +392,8 @@ def rollout(vec_env, policy, eval_stats=None):
     ep_cnt = 0
     while True:
         with torch.no_grad():
-            obs = torch.as_tensor(obs).to(device)
+            # TODO: hardcoded device
+            obs = torch.as_tensor(obs).to("cuda")
             if hasattr(policy, "lstm"):
                 action, _, _, _, state = policy(obs, state)
             else:
@@ -499,14 +519,17 @@ def sweep_carbs(args: AppConfig, sweep_count=500, max_suggestion_cost=3600):
         min_timesteps = time_param["min"]
         param_spaces.append(
             carbs_param(
-                "train", "total_timesteps", "log", sweep_parameters, search_center=min_timesteps, is_integer=True
+                "train",
+                "total_timesteps",
+                "log",
+                sweep_parameters,
+                search_center=min_timesteps,
+                is_integer=True,
             )
         )
 
     # Add learning rate parameter
-    param_spaces.append(
-        carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args.ssc_lr)
-    )
+    param_spaces.append(carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args.ssc_lr))
 
     # batch_param = sweep_parameters['train']['parameters']['batch_size']
     # default_batch = (batch_param['max'] - batch_param['min']) // 2
@@ -523,7 +546,14 @@ def sweep_carbs(args: AppConfig, sweep_count=500, max_suggestion_cost=3600):
     param_spaces += [
         # carbs_param("train", "gamma", "logit", sweep_parameters, search_center=0.97),
         carbs_param("train", "gae_lambda", "logit", sweep_parameters, search_center=0.50),
-        carbs_param("train", "update_epochs", "linear", sweep_parameters, search_center=3, is_integer=True),
+        carbs_param(
+            "train",
+            "update_epochs",
+            "linear",
+            sweep_parameters,
+            search_center=3,
+            is_integer=True,
+        ),
         carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.1),
         carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=2.0),
         # carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
@@ -563,12 +593,12 @@ def sweep_carbs(args: AppConfig, sweep_count=500, max_suggestion_cost=3600):
         # Update args with suggestion values
         for k, v in train_suggestion.items():
             setattr(args.train, k, v)
-            
+
         for k, v in env_suggestion.items():
             setattr(args.env, k, v)
-            
+
         args.track = True
-        
+
         # Update wandb config
         wandb.config.update({"train": asdict(args.train)}, allow_val_change=True)
         wandb.config.update({"env": asdict(args.env)}, allow_val_change=True)
@@ -579,11 +609,17 @@ def sweep_carbs(args: AppConfig, sweep_count=500, max_suggestion_cost=3600):
 
         try:
             vec_env = pufferlib.vector.make(env_creator, env_kwargs=asdict(args.env))
-            #TODO(howird): make sure my updates to make policy didnt mess anything up
+            # TODO(howird): make sure my updates to make policy didnt mess anything up
             policy = make_policy(vec_env.driver_env, args)
 
             stats, uptime = train(
-                args, vec_env, policy, wandb, exp_id, skip_resample=args.skip_resample, final_eval=args.final_eval
+                args,
+                vec_env,
+                policy,
+                wandb,
+                exp_id,
+                skip_resample=args.skip_resample,
+                final_eval=args.final_eval,
             )
 
         except Exception:
@@ -625,21 +661,21 @@ if __name__ == "__main__":
     if args.mode == "play":
         args.env.num_envs = 16
         args.env.headless = False
-    
+
     # If sweep mode, run sweep and exit
     if args.mode == "sweep":
         sweep_carbs(args, sweep_count=500)
         sys.exit(0)
-    
+
     # Create the environment and policy
     vec_env = pufferlib.vector.make(env_creator, env_args=[args.env])
     policy = make_policy(vec_env.driver_env, args)
-    
+
     if args.checkpoint_path:
         checkpoint = torch.load(args.checkpoint_path, map_location=args.train.device)
         policy.load_state_dict(checkpoint["state_dict"])
         print(f"Loaded checkpoint from {args.checkpoint_path}")
-    
+
     # Train or evaluate based on mode
     # TODO(py310): use match statement
     if args.mode == "train":
@@ -652,14 +688,17 @@ if __name__ == "__main__":
 
     elif args.mode == "eval":
         import polars as pl
-        
+
         eval_stats = EvalStats(vec_env)
         rollout(vec_env, policy, eval_stats)
-        
+
         with open(f"eval_summary_{datetime.now().strftime('%m%d_%H%M')}.json", "w") as f:
             json.dump(eval_stats.results, f, indent=4)
-        
+
         df = pl.DataFrame(eval_stats.results_by_motion)
-        df.write_csv(f"results_by_motion_{datetime.now().strftime('%m%d_%H%M')}.tsv", separator="\t")
-        
+        df.write_csv(
+            f"results_by_motion_{datetime.now().strftime('%m%d_%H%M')}.tsv",
+            separator="\t",
+        )
+
         eval_stats.update_env_and_close()

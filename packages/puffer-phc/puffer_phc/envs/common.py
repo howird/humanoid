@@ -362,4 +362,3 @@ def compute_humanoid_im_reset(
     reset = torch.where(pass_time, torch.ones_like(reset_buf), terminated)
 
     return reset, terminated
-

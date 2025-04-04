@@ -754,7 +754,7 @@ def try_load_checkpoint(data):
     model_path = os.path.join(path, resume_state["model_name"])
     data.policy.uncompiled.load_state_dict(model_path, map_location=config.device)
     data.optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-    print(f'Loaded checkpoint {resume_state["model_name"]}')
+    print(f"Loaded checkpoint {resume_state['model_name']}")
 
 
 def count_params(policy):
@@ -769,7 +769,7 @@ def seed_everything(seed, torch_deterministic):
     torch.backends.cudnn.deterministic = torch_deterministic
 
 
-ROUND_OPEN = rich.box.Box("╭──╮\n" "│  │\n" "│  │\n" "│  │\n" "│  │\n" "│  │\n" "│  │\n" "╰──╯\n")
+ROUND_OPEN = rich.box.Box("╭──╮\n│  │\n│  │\n│  │\n│  │\n│  │\n│  │\n╰──╯\n")
 
 c1 = "[bright_cyan]"
 c2 = "[white]"
@@ -782,13 +782,13 @@ def abbreviate(num):
     if num < 1e3:
         return f"{b2}{num:.0f}"
     elif num < 1e6:
-        return f"{b2}{num/1e3:.1f}{c2}k"
+        return f"{b2}{num / 1e3:.1f}{c2}k"
     elif num < 1e9:
-        return f"{b2}{num/1e6:.1f}{c2}m"
+        return f"{b2}{num / 1e6:.1f}{c2}m"
     elif num < 1e12:
-        return f"{b2}{num/1e9:.1f}{c2}b"
+        return f"{b2}{num / 1e9:.1f}{c2}b"
     else:
-        return f"{b2}{num/1e12:.1f}{c2}t"
+        return f"{b2}{num / 1e12:.1f}{c2}t"
 
 
 def duration(seconds):

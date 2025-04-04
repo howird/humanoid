@@ -25,10 +25,6 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         cfg,
     ):
         self.render_mode = "native"
-
-# {'device_type': 'cuda', 'device_id': 0, 'motion_file': 'data/motion/amass_train_take6_upright.pkl', 'has_self_collision': True, 'num_envs': 4096, 'headless': True, 'exp_name': 'puffer_phc', 'clip_actions': True, 'use_amp_obs': False, 'auto_pmcp_soft': True, 'termination_distance': 0.25, 'kp_scale': 1.0, 'kd_scale': 1.0}
-# {'env': {'num_envs': 4096, 'motion_file': 'data/motion/amass_train_take6_upright.pkl', 'rew_power_coef': 0.0005, 'use_amp_obs': False, 'auto_pmcp_soft': True, 'termination_distance': 0.25, 'kp_scale': 1.0, 'kd_scale': 1.0}, 'robot': {'has_self_collision': True}, 'exp_name': 'puffer_phc'}
-
         self.cfg: EnvConfig = cfg
 
         if self.cfg.headless:
@@ -65,6 +61,10 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         }
 
         self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.cfg.device)
+
+    @property
+    def num_agents(self):
+        return self.cfg.num_envs
 
     def reset(self, seed=None):
         self.tick = 0

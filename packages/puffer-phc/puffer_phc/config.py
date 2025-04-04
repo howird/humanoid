@@ -3,7 +3,7 @@ from typing import Optional, Literal
 
 from tyro.conf import Suppress, Fixed
 
-from puffer_phc.envs.humanoid_phc import StateInit
+from puffer_phc.envs.state_init import StateInit
 
 
 @dataclass
@@ -22,8 +22,8 @@ class DeviceConfig:
 
 @dataclass
 class RewardConfig:
-    k_pos: int = 100
-    k_rot: int = 10
+    k_pos: float = 100.0
+    k_rot: float = 10.0
     k_vel: float = 0.1
     k_ang_vel: float = 0.1
     w_pos: float = 0.5
@@ -77,6 +77,7 @@ class RobotConfig:
 @dataclass
 class EnvConfig(DeviceConfig):
     """Environment configuration"""
+
     name: str = "humanoid_phc"
     motion_file: str = "data/motion/amass_train_take6_upright.pkl"
     num_envs: int = 4096
@@ -95,6 +96,8 @@ class EnvConfig(DeviceConfig):
     kp_scale: float = 1.0
     kd_scale: float = 1.0
     log_interval: int = 32
+
+    res_action: bool = False
 
     rew_power_coef: float = 0.0005
     env_spacing: int = 5
@@ -130,16 +133,22 @@ class EnvConfig(DeviceConfig):
     robot: Suppress[RobotConfig] = field(default_factory=RobotConfig)
     reward: Suppress[RewardConfig] = field(default_factory=RewardConfig)
 
+    @property
+    def num_agents(self) -> int:
+        return self.num_envs
+
 
 @dataclass
 class PolicyConfig:
     """Policy configuration"""
+
     hidden_size: int = 512
 
 
 @dataclass
 class RNNConfig:
     """RNN configuration"""
+
     input_size: int = 512
     hidden_size: int = 512
 
@@ -147,30 +156,31 @@ class RNNConfig:
 @dataclass
 class TrainConfig(DeviceConfig):
     """Training configuration"""
+
     seed: int = 1
     torch_deterministic: bool = True
     cpu_offload: bool = False
     compile: bool = False
     norm_adv: bool = True
     target_kl: Optional[float] = None
-    
+
     total_timesteps: int = 500_000_000
     eval_timesteps: int = 1_310_000
-    
+
     data_dir: str = "experiments"
     checkpoint_interval: int = 1500
     motion_resample_interval: int = 500
-    
+
     num_workers: int = 1
     num_envs: int = 1
     batch_size: int = 131072
     minibatch_size: int = 32768
-    
+
     learning_rate: float = 0.0001
     anneal_lr: bool = False
     lr_decay_rate: float = 1.5e-4
     lr_decay_floor: float = 0.2
-    
+
     update_epochs: int = 4
     bptt_horizon: int = 8
     gae_lambda: float = 0.2
@@ -186,5 +196,4 @@ class TrainConfig(DeviceConfig):
     l2_reg_coef: float = 0.0
 
     # 'registers' inherited DeviceConfig.device with dataclasses
-    device: str = field(init=False)
-
+    device: str = field(init=False)  # type: ignore
