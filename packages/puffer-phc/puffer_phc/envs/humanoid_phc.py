@@ -20,6 +20,13 @@ from puffer_phc.poselib_skeleton import SkeletonTree
 from puffer_phc.motion_lib import MotionLibSMPL, FixHeightMode
 from puffer_phc.torch_utils import to_torch, torch_rand_float
 
+from puffer_phc.body_sets import (
+    build_body_ids_tensor, BODY_NAMES
+    DOF_NAMES, REMOVE_NAMES, LIMB_WEIGHT_GROUP
+    KEY_BODIES, CONTACT_BODIES, TRACK_BODIES,
+    RESET_BODIES, EVAL_BODIES
+)
+
 
 class StateInit(Enum):
     Default = 0
@@ -98,18 +105,17 @@ class HumanoidPHC:
 
         else:
             pd_tar = self._action_to_pd_targets(actions)
+            
             if self._freeze_hand:
-                pd_tar[
-                    :,
-                    self._dof_names.index("L_Hand") * 3 : (self._dof_names.index("L_Hand") * 3 + 3),
-                ] = 0
-                pd_tar[
-                    :,
-                    self._dof_names.index("R_Hand") * 3 : (self._dof_names.index("R_Hand") * 3 + 3),
-                ] = 0
+                hand_idx = DOF_NAMES.index("L_Hand") * 3
+                r_hand_idx = DOF_NAMES.index("R_Hand") * 3
+                pd_tar[:, hand_idx:hand_idx+3] = 0
+                pd_tar[:, r_hand_idx:r_hand_idx+3] = 0
             if self._freeze_toe:
-                pd_tar[:, self._dof_names.index("L_Toe") * 3 : (self._dof_names.index("L_Toe") * 3 + 3)] = 0
-                pd_tar[:, self._dof_names.index("R_Toe") * 3 : (self._dof_names.index("R_Toe") * 3 + 3)] = 0
+                toe_idx = DOF_NAMES.index("L_Toe") * 3
+                r_toe_idx = DOF_NAMES.index("R_Toe") * 3
+                pd_tar[:, toe_idx:toe_idx+3] = 0
+                pd_tar[:, r_toe_idx:r_toe_idx+3] = 0
 
         pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
         self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
@@ -170,42 +176,16 @@ class HumanoidPHC:
     #####################################################################
 
     def _config_robot(self):
-
-        # Following UHC as hand and toes does not have realiable data.
-        self.remove_names = ["L_Hand", "R_Hand", "L_Toe", "R_Toe"]
-
-        self.joint_groups = [
-            ["L_Hip", "L_Knee", "L_Ankle", "L_Toe"],
-            ["R_Hip", "R_Knee", "R_Ankle", "R_Toe"],
-            ["Pelvis", "Torso", "Spine", "Chest", "Neck", "Head"],
-            ["L_Thorax", "L_Shoulder", "L_Elbow", "L_Wrist", "L_Hand"],
-            ["R_Thorax", "R_Shoulder", "R_Elbow", "R_Wrist", "R_Hand"],
-        ]
-        self.limb_weight_group = [
-            [self.cfg.body_names.index(joint_name) for joint_name in joint_group] for joint_group in self.joint_groups
-        ]
-
+        
+        # Calculate dof_subset
         disc_idxes = []
-        self._dof_names = self.cfg.body_names[1:]
-        for idx, name in enumerate(self._dof_names):
-            if name not in self.remove_names:
+        for idx, name in enumerate(DOF_NAMES):
+            if name not in REMOVE_NAMES:
                 disc_idxes.append(np.arange(idx * 3, (idx + 1) * 3))
 
         self.dof_subset = (
             torch.from_numpy(np.concatenate(disc_idxes)) if len(disc_idxes) > 0 else torch.tensor([]).long()
         )
-        self.left_indexes = [idx for idx, name in enumerate(self._dof_names) if name.startswith("L")]
-        self.left_lower_indexes = [
-            idx
-            for idx, name in enumerate(self._dof_names)
-            if name.startswith("L") and name[2:] in ["Hip", "Knee", "Ankle", "Toe"]
-        ]
-        self.right_indexes = [idx for idx, name in enumerate(self._dof_names) if name.startswith("R")]
-        self.right_lower_indexes = [
-            idx
-            for idx, name in enumerate(self._dof_names)
-            if name.startswith("R") and name[2:] in ["Hip", "Knee", "Ankle", "Toe"]
-        ]
 
         ### Load the Neutral SMPL humanoid asset only
         self.gender_beta = np.zeros(17)  # NOTE: gender (1) + betas (16)
@@ -243,10 +223,6 @@ class HumanoidPHC:
                 body_id == body_id_asset
             ), f"Body id {body_id} does not match index {body_id_asset} for body {body_name}"
 
-    def _build_body_ids_tensor(self, body_names):
-        body_ids = [self.cfg.body_names.index(name) for name in body_names]
-        return to_torch(body_ids, device=self.cfg.device, dtype=torch.long)
-
     def _create_force_sensors(self, sensor_joint_names):
         sensor_pose = gymapi.Transform()
 
@@ -256,21 +232,18 @@ class HumanoidPHC:
 
 
     def _config_env(self):
-        self._termination_distances = to_torch(np.array([self.cfg.termination_distance] * self.cfg.num_bodies), device=self.cfg.device)
+        self._termination_distances = to_torch(np.array([self.cfg.termination_distance] * self.num_bodies), device=self.cfg.device)
         self._termination_distances_backup = self._termination_distances.clone() # keep backup for train/eval
 
+        self._key_body_ids = build_body_ids_tensor(BODY_NAMES, KEY_BODIES, self.cfg.device)
+        self._contact_body_ids = build_body_ids_tensor(BODY_NAMES, CONTACT_BODIES, self.cfg.device)
+        self._track_bodies_id = build_body_ids_tensor(BODY_NAMES, TRACK_BODIES, self.cfg.device)
 
-        self._key_body_ids = self._build_body_ids_tensor(self.cfg.key_bodies)
-        self._contact_body_ids = self._build_body_ids_tensor(self.cfg.contact_bodies)
-        self._track_bodies_id = self._build_body_ids_tensor(self._track_bodies)
-
-        self._reset_bodies_id = self._build_body_ids_tensor(self._reset_bodies)
+        self._reset_bodies_id = build_body_ids_tensor(BODY_NAMES, RESET_BODIES, self.cfg.device)
         self._reset_bodies_id_backup = self._reset_bodies_id # keep backup for train/eval
 
-        # Used in https://github.com/kywch/PHC/blob/pixi/phc/learning/im_amp.py#L181. Check how it is used.
-        for name in self.remove_names:
-            self._eval_bodies.remove(name)
-        self._eval_track_bodies_id = self._build_body_ids_tensor(self._eval_bodies)
+        # Used in https://github.com/kywch/PHC/blob/pixi/phc/learning/im_amp.py#L181
+        self._eval_track_bodies_id = build_body_ids_tensor(BODY_NAMES, EVAL_BODIES, self.cfg.device)
 
 
     def _create_ground_plane(self):
@@ -377,9 +350,9 @@ class HumanoidPHC:
 
         curr_skeleton_tree = self.skeleton_trees[env_id]
         limb_lengths = torch.norm(curr_skeleton_tree.local_translation, dim=-1)
-        limb_lengths = [limb_lengths[group].sum() for group in self.limb_weight_group]
+        limb_lengths = [limb_lengths[group].sum() for group in LIMB_WEIGHT_GROUP]
         masses = torch.tensor(mass_ind)
-        masses = [masses[group].sum() for group in self.limb_weight_group]
+        masses = [masses[group].sum() for group in LIMB_WEIGHT_GROUP]
         humanoid_limb_weight = torch.tensor(limb_lengths + masses)
         self.humanoid_limb_and_weights.append(humanoid_limb_weight)  # ZL: attach limb lengths and full body weight.
 
@@ -456,8 +429,8 @@ class HumanoidPHC:
         self._pd_action_offset = to_torch(self._pd_action_offset, device=self.cfg.device)
         self._pd_action_scale = to_torch(self._pd_action_scale, device=self.cfg.device)
 
-        self._L_knee_dof_idx = self._dof_names.index("L_Knee") * 3 + 1
-        self._R_knee_dof_idx = self._dof_names.index("R_Knee") * 3 + 1
+        self._L_knee_dof_idx = DOF_NAMES.index("L_Knee") * 3 + 1
+        self._R_knee_dof_idx = DOF_NAMES.index("R_Knee") * 3 + 1
 
         # ZL: Modified SMPL to give stronger knee
         self._pd_action_scale[self._L_knee_dof_idx] = 5
@@ -465,13 +438,13 @@ class HumanoidPHC:
 
         if self._has_smpl_pd_offset:
             if self._has_upright_start:
-                self._pd_action_offset[self._dof_names.index("L_Shoulder") * 3] = -np.pi / 2
-                self._pd_action_offset[self._dof_names.index("R_Shoulder") * 3] = np.pi / 2
+                self._pd_action_offset[DOF_NAMES.index("L_Shoulder") * 3] = -np.pi / 2
+                self._pd_action_offset[DOF_NAMES.index("R_Shoulder") * 3] = np.pi / 2
             else:
-                self._pd_action_offset[self._dof_names.index("L_Shoulder") * 3] = -np.pi / 6
-                self._pd_action_offset[self._dof_names.index("L_Shoulder") * 3 + 2] = -np.pi / 2
-                self._pd_action_offset[self._dof_names.index("R_Shoulder") * 3] = -np.pi / 3
-                self._pd_action_offset[self._dof_names.index("R_Shoulder") * 3 + 2] = np.pi / 2
+                self._pd_action_offset[DOF_NAMES.index("L_Shoulder") * 3] = -np.pi / 6
+                self._pd_action_offset[DOF_NAMES.index("L_Shoulder") * 3 + 2] = -np.pi / 2
+                self._pd_action_offset[DOF_NAMES.index("R_Shoulder") * 3] = -np.pi / 3
+                self._pd_action_offset[DOF_NAMES.index("R_Shoulder") * 3 + 2] = np.pi / 2
 
     def _define_gym_spaces(self):
         ### Observations
@@ -1453,5 +1426,3 @@ class HumanoidPHC:
 
         # Return the motion lib termination history
         return self._motion_lib._termination_history.clone()
-
-

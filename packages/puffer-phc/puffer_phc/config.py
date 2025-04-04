@@ -1,8 +1,7 @@
 from dataclasses import dataclass, field
-from typing import Optional, Literal, Tuple
+from typing import Optional, Literal
 
 from tyro.conf import Suppress, Fixed
-from puffer_phc.smpl import SMPL_MUJOCO_NAMES
 
 from puffer_phc.envs.humanoid_phc import StateInit
 
@@ -131,18 +130,6 @@ class EnvConfig(DeviceConfig):
     robot: Suppress[RobotConfig] = field(default_factory=RobotConfig)
     reward: Suppress[RewardConfig] = field(default_factory=RewardConfig)
 
-    body_names: Suppress[Tuple] = SMPL_MUJOCO_NAMES
-    key_bodies: Suppress[Tuple] = ("R_Ankle", "L_Ankle", "R_Wrist", "L_Wrist")
-    contact_bodies: Suppress[Tuple] = ("R_Ankle", "L_Ankle", "R_Toe", "L_Toe")
-    # body_names.copy()
-    full_track_bodies: Suppress[Tuple] = SMPL_MUJOCO_NAMES
-    # full_track_bodies
-    track_bodies: Suppress[Tuple] = SMPL_MUJOCO_NAMES
-    # track_bodies
-    reset_bodies: Suppress[Tuple] = SMPL_MUJOCO_NAMES
-    # body_names.copy()
-    eval_bodies: Suppress[Tuple] = SMPL_MUJOCO_NAMES
-
 
 @dataclass
 class PolicyConfig:
@@ -198,6 +185,6 @@ class TrainConfig(DeviceConfig):
     bound_coef: float = 10.0
     l2_reg_coef: float = 0.0
 
-    # 'register' inherited DeviceConfig.device with dataclasses
+    # 'registers' inherited DeviceConfig.device with dataclasses
     device: str = field(init=False)
 
