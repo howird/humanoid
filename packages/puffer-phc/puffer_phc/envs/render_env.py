@@ -16,7 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from puffer_phc import ASSET_DIR
-from puffer_phc.humanoid_phc import HumanoidPHC
+from puffer_phc.envs.humanoid_phc import HumanoidPHC
 from puffer_phc.torch_utils import to_torch, exp_map_to_quat
 
 

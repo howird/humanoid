@@ -1,8 +1,9 @@
 import time
 import argparse
 import functools
-from puffer_phc.humanoid_phc import HumanoidPHC
-from puffer_phc.render_env import HumanoidRenderEnv
+from puffer_phc.envs.humanoid_phc import HumanoidPHC
+from puffer_phc.envs.render_env import HumanoidRenderEnv
+from puffer_phc.config import EnvConfig
 
 import torch
 import numpy as np
@@ -14,78 +15,48 @@ def env_creator(name="puffer_phc"):
     return functools.partial(make, name)
 
 
-def make(name, **kwargs):
-    return PHCPufferEnv(name, **kwargs)
+def make(cfg):
+    return PHCPufferEnv(cfg)
 
 
 class PHCPufferEnv(pufferlib.PufferEnv):
     def __init__(
         self,
-        name,
-        motion_file,
-        has_self_collision,
-        num_envs=32,
-        device_type="cuda",
-        exp_name="puffer_phc",
-        clip_actions=True,
-        device_id=0,
-        headless=True,
-        log_interval=32,
-        rew_power_coef=0.0005,
-        use_amp_obs=False,
-        auto_pmcp_soft=False,
-        termination_distance=0.25,
-        kp_scale=1.0,
-        kd_scale=1.0,
+        cfg,
     ):
         self.render_mode = "native"
-        cfg = {
-            "env": {
-                "num_envs": num_envs,
-                "motion_file": motion_file,
-                "rew_power_coef": rew_power_coef,
-                "use_amp_obs": use_amp_obs,
-                "auto_pmcp_soft": auto_pmcp_soft,
-                "termination_distance": termination_distance,
-                "kp_scale": kp_scale,
-                "kd_scale": kd_scale,
-            },
-            "robot": {
-                "has_self_collision": has_self_collision,
-            },
-            "exp_name": exp_name,
-        }
-        if headless:
-            self.env = HumanoidPHC(cfg, device_type=device_type, device_id=device_id, headless=headless)
+
+# {'device_type': 'cuda', 'device_id': 0, 'motion_file': 'data/motion/amass_train_take6_upright.pkl', 'has_self_collision': True, 'num_envs': 4096, 'headless': True, 'exp_name': 'puffer_phc', 'clip_actions': True, 'use_amp_obs': False, 'auto_pmcp_soft': True, 'termination_distance': 0.25, 'kp_scale': 1.0, 'kd_scale': 1.0}
+# {'env': {'num_envs': 4096, 'motion_file': 'data/motion/amass_train_take6_upright.pkl', 'rew_power_coef': 0.0005, 'use_amp_obs': False, 'auto_pmcp_soft': True, 'termination_distance': 0.25, 'kp_scale': 1.0, 'kd_scale': 1.0}, 'robot': {'has_self_collision': True}, 'exp_name': 'puffer_phc'}
+
+        self.cfg: EnvConfig = cfg
+
+        if self.cfg.headless:
+            self.env = HumanoidPHC(cfg)
         else:
-            self.env = HumanoidRenderEnv(cfg, device_type=device_type, device_id=device_id, headless=headless)
+            self.env = HumanoidRenderEnv(cfg)
 
         self.single_observation_space = self.env.single_observation_space
         self.single_action_space = self.env.single_action_space
-        self.num_agents = self.num_envs = self.env.num_envs
-        self.clip_actions = clip_actions
-        self.device = self.env.device
 
-        self.use_amp_obs = use_amp_obs
-        self.amp_observation_space = self.env.amp_observation_space if use_amp_obs else None
+        self.amp_observation_space = self.env.amp_observation_space if self.cfg.use_amp_obs else None
 
         # Check the buffer data types, match them to puffer
         buffers = pufferlib.namespace(
             observations=self.env.obs_buf,
             rewards=self.env.rew_buf,
-            terminals=torch.zeros(self.num_agents, dtype=torch.bool, device=self.device),
+            terminals=torch.zeros(self.num_agents, dtype=torch.bool, device=self.cfg.device),
             truncations=torch.zeros_like(self.env.reset_buf),
             masks=torch.ones_like(self.env.reset_buf),
             actions=torch.zeros(
-                (self.num_agents, *self.single_action_space.shape), dtype=torch.float, device=self.device
+                (self.num_agents, *self.single_action_space.shape), dtype=torch.float, device=self.cfg.device
             ),
         )
 
         super().__init__(buffers)
 
-        self.log_interval = log_interval
-        self.episode_returns = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self.episode_lengths = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        self.episode_returns = torch.zeros(self.cfg.num_envs, dtype=torch.float32, device=self.cfg.device)
+        self.episode_lengths = torch.zeros(self.cfg.num_envs, dtype=torch.int32, device=self.cfg.device)
         self.episode_count = 0
         self._infos = {
             "episode_return": [],
@@ -93,7 +64,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             "truncated_rate": [],
         }
 
-        self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.device)
+        self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.cfg.device)
 
     def reset(self, seed=None):
         self.tick = 0
@@ -101,7 +72,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # self.demo = self.env.demo
         # self.state = self.env.state
-        self.amp_obs = self.env.amp_obs if self.use_amp_obs else None
+        self.amp_obs = self.env.amp_obs if self.cfg.use_amp_obs else None
 
         # Clear the buffers
         self.rewards[:] = 0
@@ -117,7 +88,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions_np):
-        if self.clip_actions:
+        if self.cfg.clip_actions:
             actions_np = np.clip(actions_np, -1, 1)
         self.actions[:] = torch.from_numpy(actions_np)
 
@@ -126,7 +97,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # self.demo = self.env.demo
         # self.state = self.env.state
-        self.amp_obs = self.env.amp_obs if self.use_amp_obs else None
+        self.amp_obs = self.env.amp_obs if self.cfg.use_amp_obs else None
 
         rew = self.rewards.clone()
 
@@ -171,16 +142,16 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         # TODO: self.env.extras has infos. Extract useful info?
         info = []
         self.tick += 1
-        if self.tick % self.log_interval == 0:
+        if self.tick % self.cfg.log_interval == 0:
             info = self.mean_and_log()
 
             # Extract reward-related info
             reward_info = {
-                "rew_body_pos": self.raw_rewards[0].item() / self.log_interval,
-                "rew_body_rot": self.raw_rewards[1].item() / self.log_interval,
-                "rew_lin_vel": self.raw_rewards[2].item() / self.log_interval,
-                "rew_ang_vel": self.raw_rewards[3].item() / self.log_interval,
-                "rew_power": self.raw_rewards[4].item() / self.log_interval,
+                "rew_body_pos": self.raw_rewards[0].item() / self.cfg.log_interval,
+                "rew_body_rot": self.raw_rewards[1].item() / self.cfg.log_interval,
+                "rew_lin_vel": self.raw_rewards[2].item() / self.cfg.log_interval,
+                "rew_ang_vel": self.raw_rewards[3].item() / self.cfg.log_interval,
+                "rew_power": self.raw_rewards[4].item() / self.cfg.log_interval,
             }
 
             self.raw_rewards[:] = 0

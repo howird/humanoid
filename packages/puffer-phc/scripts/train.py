@@ -29,100 +29,21 @@ from puffer_phc import clean_pufferl
 from puffer_phc.environment import make as env_creator
 import puffer_phc.policy as policy_module
 
-
-@dataclass
-class DeviceConfig:
-    device_type: Literal["cpu", "cuda"] = "cuda"
-    device_id: int = 0
-
-    @property
-    def device(self) -> str:
-        """
-        NOTE: dataclass will no be aware of this property.
-        To do so, add: `device: str = field(init=False)` to the child dataclass
-        """
-        return "cpu" if self.device_type == "cpu" else f"cuda:{self.device_id}"
-
-
-@dataclass
-class EnvConfig(DeviceConfig):
-    """Environment configuration"""
-    name: str = "humanoid_phc"
-    motion_file: str = "data/motion/amass_train_take6_upright.pkl"
-    has_self_collision: bool = True
-    num_envs: int = 4096
-    headless: bool = True
-    exp_name: str = "puffer_phc"
-    clip_actions: bool = True
-    use_amp_obs: bool = False
-    auto_pmcp_soft: bool = True
-    termination_distance: float = 0.25
-    kp_scale: float = 1.0
-    kd_scale: float = 1.0
-
-
-@dataclass
-class PolicyConfig:
-    """Policy configuration"""
-    hidden_size: int = 512
-
-
-@dataclass
-class RNNConfig:
-    """RNN configuration"""
-    input_size: int = 512
-    hidden_size: int = 512
-
-
-@dataclass
-class TrainConfig(DeviceConfig):
-    """Training configuration"""
-    seed: int = 1
-    torch_deterministic: bool = True
-    cpu_offload: bool = False
-    compile: bool = False
-    norm_adv: bool = True
-    target_kl: Optional[float] = None
-    
-    total_timesteps: int = 500_000_000
-    eval_timesteps: int = 1_310_000
-    
-    data_dir: str = "experiments"
-    checkpoint_interval: int = 1500
-    motion_resample_interval: int = 500
-    
-    num_workers: int = 1
-    num_envs: int = 1
-    batch_size: int = 131072
-    minibatch_size: int = 32768
-    
-    learning_rate: float = 0.0001
-    anneal_lr: bool = False
-    lr_decay_rate: float = 1.5e-4
-    lr_decay_floor: float = 0.2
-    
-    update_epochs: int = 4
-    bptt_horizon: int = 8
-    gae_lambda: float = 0.2
-    gamma: float = 0.98
-    clip_coef: float = 0.01
-    vf_coef: float = 1.2
-    clip_vloss: bool = True
-    vf_clip_coef: float = 0.2
-    max_grad_norm: float = 10.0
-    ent_coef: float = 0.0
-    disc_coef: float = 5.0
-    bound_coef: float = 10.0
-    l2_reg_coef: float = 0.0
-
-    # register inherited DeviceConfig.device with dataclasses
-    device: str = field(init=False)
+from puffer_phc.config import EnvConfig, PolicyConfig, RNNConfig, TrainConfig
 
 
 @dataclass
 class DebugConfig:
     enable: bool = False
     port: int = 5678
+
+    def __call__(self):
+        if self.enable:
+            import debugpy
+            debugpy.listen(self.port)
+            print(f"Waiting for debugger attach to port: {self.port}")
+            debugpy.wait_for_client()
+    
 
 
 @dataclass
@@ -329,12 +250,15 @@ class EvalStats:
         return self.results
 
 
-def make_policy(env, policy_cls, rnn_cls, args: AppConfig):
-    policy = policy_cls(env, **asdict(args.policy))
-    if rnn_cls is not None:
+def make_policy(env, args: AppConfig):
+    """Creates pufferlib policy, checking whether to use RNN based AppConfig.r"""
+    if args.rnn_name:
+        rnn_cls = getattr(policy_module, args.rnn_name)
         policy = rnn_cls(env, policy, **asdict(args.rnn))
         policy = pufferlib.cleanrl.RecurrentPolicy(policy)
     else:
+        policy_cls = getattr(policy_module, args.policy_name)
+        policy = policy_cls(env, **asdict(args.policy))
         policy = pufferlib.cleanrl.Policy(policy)
 
     return policy.to(args.train.device)
@@ -655,11 +579,8 @@ def sweep_carbs(args: AppConfig, sweep_count=500, max_suggestion_cost=3600):
 
         try:
             vec_env = pufferlib.vector.make(env_creator, env_kwargs=asdict(args.env))
-            policy_cls = getattr(policy_module, args.policy_name)
-            rnn_cls = None
-            if args.rnn_name:
-                rnn_cls = getattr(policy_module, args.rnn_name)
-            policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
+            #TODO(howird): make sure my updates to make policy didnt mess anything up
+            policy = make_policy(vec_env.driver_env, args)
 
             stats, uptime = train(
                 args, vec_env, policy, wandb, exp_id, skip_resample=args.skip_resample, final_eval=args.final_eval
@@ -698,12 +619,8 @@ if __name__ == "__main__":
     if "cuda" in (args.env.device_type, args.train.device_type):
         assert torch.cuda.is_available(), "CUDA is not available"
 
-    if args.debug.enable:
-        import debugpy
-        debugpy.listen(args.debug.port)
-        print(f"Waiting for debugger attach to port: {args.debug.port}")
-        debugpy.wait_for_client()
-    
+    args.debug()
+
     # If play mode, adjust environment settings
     if args.mode == "play":
         args.env.num_envs = 16
@@ -715,12 +632,8 @@ if __name__ == "__main__":
         sys.exit(0)
     
     # Create the environment and policy
-    vec_env = pufferlib.vector.make(env_creator, env_kwargs=asdict(args.env))
-    policy_cls = getattr(policy_module, args.policy_name)
-    rnn_cls = None
-    if args.rnn_name:
-        rnn_cls = getattr(policy_module, args.rnn_name)
-    policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
+    vec_env = pufferlib.vector.make(env_creator, env_args=[args.env])
+    policy = make_policy(vec_env.driver_env, args)
     
     if args.checkpoint_path:
         checkpoint = torch.load(args.checkpoint_path, map_location=args.train.device)
@@ -731,12 +644,12 @@ if __name__ == "__main__":
     # TODO(py310): use match statement
     if args.mode == "train":
         train(args, vec_env, policy)
-    
+
     elif args.mode == "play":
         # Just play and render without collecting stats
         vec_env.env.set_termination_distances(10)
         rollout(vec_env, policy)
-    
+
     elif args.mode == "eval":
         import polars as pl
         
