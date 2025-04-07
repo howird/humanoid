@@ -67,7 +67,7 @@ class RobotConfig:
     reduce_action: bool = False
     freeze_hand: bool = True
     freeze_toe: bool = True
-    reduced_action_idx = [0, 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36, 37, 42, 43, 44, 47, 48, 49, 50, 57, 58, 59, 62, 63, 64, 65]  # fmt: skip
+    reduced_action_idx = (0, 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36, 37, 42, 43, 44, 47, 48, 49, 50, 57, 58, 59, 62, 63, 64, 65)  # fmt: skip
 
     # See self._build_pd_action_offset_scale()
     bias_offset: bool = False

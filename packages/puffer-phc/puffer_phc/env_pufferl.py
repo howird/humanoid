@@ -176,7 +176,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         info = {
             "episode_return": np.mean(self._infos["episode_return"]),
             "episode_length": np.mean(self._infos["episode_length"]),
-            "epi_trunc_rate": np.mean(self._infos["truncated_rate"]),
+            "truncated_rate": np.mean(self._infos["truncated_rate"]),
         }
         self._infos["episode_return"].clear()
         self._infos["episode_length"].clear()
