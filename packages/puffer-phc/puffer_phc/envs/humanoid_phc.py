@@ -950,7 +950,7 @@ class HumanoidPHC:
         # self.state, self.demo = self._compute_state_obs(env_ids)
 
         if self.cfg.add_obs_noise and not self.flag_test:
-            obs = obs + torch.randn_like(obs) * 0.1
+            obs = obs + torch.randn_like(obs) * self.cfg.obs_noise_std
 
         self.obs_buf[env_ids] = obs
 

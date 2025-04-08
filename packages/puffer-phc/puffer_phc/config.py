@@ -41,10 +41,6 @@ class RobotConfig:
     # TODO: support others
     humanoid_type: Literal["smpl"] = "smpl"
     has_self_collision: bool = True
-    reduce_action: bool = False
-    freeze_hand: bool = True
-    freeze_toe: bool = True
-    bias_offset: bool = False
     has_smpl_pd_offset: bool = False
 
     # the following are different from original PHC
@@ -71,7 +67,6 @@ class RobotConfig:
 
     # See self._build_pd_action_offset_scale()
     bias_offset: bool = False
-    has_smpl_pd_offset: bool = False
 
 
 @dataclass
@@ -110,10 +105,11 @@ class EnvConfig(DeviceConfig):
 
     local_root_obs: bool = True
     root_height_obs: bool = True
-    add_obs_noise: bool = True
 
-    add_action_noise: bool = True
-    action_noise_std: bool = True
+    add_obs_noise: bool = False
+    obs_noise_std: float = 0.1
+    add_action_noise: bool = False
+    action_noise_std: float = 0.05
 
     # TODO(howird): not used
     num_states: int = 0
