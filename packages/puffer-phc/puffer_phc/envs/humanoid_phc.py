@@ -1,6 +1,6 @@
 import os
 from types import SimpleNamespace
-from typing import Dict, Union
+from typing import Dict, Union, List
 from dataclasses import asdict
 
 from isaacgym import gymapi
@@ -108,23 +108,23 @@ class HumanoidPHC:
             # NOTE: not using it now. We don't have to create a new tensor every time?
             actions_full = torch.zeros([actions.shape[0], self.num_dof]).to(self.cfg.device)
             actions_full[:, self.cfg.robot.reduced_action_idx] = actions
-            pd_tar = self._action_to_pd_targets(actions_full)
+            pd_target = self._action_to_pd_targets(actions_full)
 
         else:
-            pd_tar = self._action_to_pd_targets(actions)
+            pd_target = self._action_to_pd_targets(actions)
 
             if self.cfg.robot.freeze_hand:
                 hand_idx = DOF_NAMES.index("L_Hand") * 3
                 r_hand_idx = DOF_NAMES.index("R_Hand") * 3
-                pd_tar[:, hand_idx : hand_idx + 3] = 0
-                pd_tar[:, r_hand_idx : r_hand_idx + 3] = 0
+                pd_target[:, hand_idx : hand_idx + 3] = 0
+                pd_target[:, r_hand_idx : r_hand_idx + 3] = 0
             if self.cfg.robot.freeze_toe:
                 toe_idx = DOF_NAMES.index("L_Toe") * 3
                 r_toe_idx = DOF_NAMES.index("R_Toe") * 3
-                pd_tar[:, toe_idx : toe_idx + 3] = 0
-                pd_tar[:, r_toe_idx : r_toe_idx + 3] = 0
+                pd_target[:, toe_idx : toe_idx + 3] = 0
+                pd_target[:, r_toe_idx : r_toe_idx + 3] = 0
 
-        pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
+        pd_tar_tensor = gymtorch.unwrap_tensor(pd_target)
         self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
 
         ### self._physics_step()
@@ -208,10 +208,10 @@ class HumanoidPHC:
         sk_tree = SkeletonTree.from_mjcf(asset_file_real)
         self.skeleton_trees = [sk_tree] * self.cfg.num_envs
 
-        asset_options = gymapi.AssetOptions()
+        asset_options = gymapi.AssetOptions()  # type: ignore
         asset_options.angular_damping = 0.01
         asset_options.max_angular_velocity = 100.0
-        asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+        asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE  # type: ignore
 
         self.humanoid_asset = self.gym.load_asset(self.sim, "/", asset_file_real, asset_options)
         self.num_bodies = self.gym.get_asset_rigid_body_count(self.humanoid_asset)
@@ -230,7 +230,7 @@ class HumanoidPHC:
             )
 
     def _create_force_sensors(self, sensor_joint_names):
-        sensor_pose = gymapi.Transform()
+        sensor_pose = gymapi.Transform()  # type: ignore
 
         for jt in sensor_joint_names:
             joint_idx = self.gym.find_asset_rigid_body_index(self.humanoid_asset, jt)
@@ -253,8 +253,9 @@ class HumanoidPHC:
         self._eval_track_bodies_id = build_body_ids_tensor(BODY_NAMES, EVAL_BODIES, self.cfg.device)
 
     def _create_ground_plane(self):
-        plane_params = gymapi.PlaneParams()
-        plane_params.normal = gymapi.Vec3(0, 0, 1)  # z-up
+        plane_params = gymapi.PlaneParams()  # type: ignore
+        # z-up
+        plane_params.normal = gymapi.Vec3(0, 0, 1)  # type: ignore
         plane_params.static_friction = 1.0  # self.cfg["env"]["plane"]["staticFriction"]
         plane_params.dynamic_friction = 1.0  # self.cfg["env"]["plane"]["dynamicFriction"]
         plane_params.restitution = 0.0  # self.cfg["env"]["plane"]["restitution"]
@@ -265,28 +266,28 @@ class HumanoidPHC:
         self.env_origins = []
         self.humanoid_handles = []
         self.humanoid_masses = []
-        self.humanoid_limb_and_weights = []
         max_agg_bodies, max_agg_shapes = 160, 160
 
-        lower = gymapi.Vec3(-self.cfg.env_spacing, -self.cfg.env_spacing, 0.0)
-        upper = gymapi.Vec3(self.cfg.env_spacing, self.cfg.env_spacing, self.cfg.env_spacing)
+        lower = gymapi.Vec3(-self.cfg.env_spacing, -self.cfg.env_spacing, 0.0)  # type: ignore
+        upper = gymapi.Vec3(self.cfg.env_spacing, self.cfg.env_spacing, self.cfg.env_spacing)  # type: ignore
         num_per_row = int(np.sqrt(self.cfg.num_envs))
 
         # Since the same humanoid is used for all the envs ...
-        dof_prop = self.gym.get_asset_dof_properties(self.humanoid_asset)
+        dof_prop: Dict["str", List[float]] = self.gym.get_asset_dof_properties(self.humanoid_asset)
         assert self.cfg.control_mode == "isaac_pd"
-        dof_prop["driveMode"] = gymapi.DOF_MODE_POS
+        dof_prop["driveMode"] = gymapi.DOF_MODE_POS  # type: ignore
         dof_prop["stiffness"] *= self.cfg.kp_scale
         dof_prop["damping"] *= self.cfg.kd_scale
 
         # NOTE: (from Joseph) You get a small perf boost (~4%) by putting all the actors in the same env
+        humanoid_limb_and_weights: List[torch.Tensor] = []
         for i in range(self.cfg.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, lower, upper, num_per_row)
             self.gym.begin_aggregate(env_ptr, max_agg_bodies, max_agg_shapes, True)
 
             # NOTE: Different humanoid asset files can be provided to _build_env() for each env
-            self._build_single_env(i, env_ptr, self.humanoid_asset, dof_prop)
+            self._build_single_env(i, env_ptr, self.humanoid_asset, dof_prop, humanoid_limb_and_weights)
 
             self.gym.end_aggregate(env_ptr)
             self.envs.append(env_ptr)
@@ -296,37 +297,38 @@ class HumanoidPHC:
             col = i % num_per_row
             self.env_origins.append((col * 2 * self.cfg.env_spacing, row * 2 * self.cfg.env_spacing, 0.0))
 
-        # NOTE: self.humanoid_limb_and_weights comes from self._build_env()
-        self.humanoid_limb_and_weights = torch.stack(self.humanoid_limb_and_weights).to(self.cfg.device)
+        self.humanoid_limb_and_weights = torch.stack(humanoid_limb_and_weights).to(self.cfg.device)
 
         # These should be all the same because we use the same humanoid for all agents
         print("Humanoid Weights", self.humanoid_masses[:10])
 
         ### Define dof limits
-        self.dof_limits_lower = []
-        self.dof_limits_upper = []
+        dof_limits_lower: List[float] = []
+        dof_limits_upper: List[float] = []
         for j in range(self.num_dof):
             if dof_prop["lower"][j] > dof_prop["upper"][j]:
-                self.dof_limits_lower.append(dof_prop["upper"][j])
-                self.dof_limits_upper.append(dof_prop["lower"][j])
+                dof_limits_lower.append(dof_prop["upper"][j])
+                dof_limits_upper.append(dof_prop["lower"][j])
             elif dof_prop["lower"][j] == dof_prop["upper"][j]:
                 print("Warning: DOF limits are the same")
                 if dof_prop["lower"][j] == 0:
-                    self.dof_limits_lower.append(-np.pi)
-                    self.dof_limits_upper.append(np.pi)
+                    dof_limits_lower.append(-np.pi)
+                    dof_limits_upper.append(np.pi)
             else:
-                self.dof_limits_lower.append(dof_prop["lower"][j])
-                self.dof_limits_upper.append(dof_prop["upper"][j])
+                dof_limits_lower.append(dof_prop["lower"][j])
+                dof_limits_upper.append(dof_prop["upper"][j])
 
-        self.dof_limits_lower = to_torch(self.dof_limits_lower, device=self.cfg.device)
-        self.dof_limits_upper = to_torch(self.dof_limits_upper, device=self.cfg.device)
+        self.dof_limits_lower = to_torch(dof_limits_lower, device=self.cfg.device)
+        self.dof_limits_upper = to_torch(dof_limits_upper, device=self.cfg.device)
         self.dof_limits = torch.stack([self.dof_limits_lower, self.dof_limits_upper], dim=-1)
         self.torque_limits = to_torch(dof_prop["effort"], device=self.cfg.device)
 
         self._build_pd_action_offset_scale()
 
     # NOTE: HumanoidRenderEnv overrides this method to add marker actors
-    def _build_single_env(self, env_id, env_ptr, humanoid_asset, dof_prop):
+    def _build_single_env(
+        self, env_id, env_ptr, humanoid_asset, dof_prop, humanoid_limb_and_weights: List[torch.Tensor]
+    ):
         # Collision settings: probably affect speed a lot
         if self.cfg.divide_group:
             # TODO(howird): idk what this does
@@ -340,9 +342,9 @@ class HumanoidPHC:
             1
         )  # ZL: segfault if we do not randomize the position
 
-        start_pose = gymapi.Transform()
-        start_pose.p = gymapi.Vec3(*pos)
-        start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+        start_pose = gymapi.Transform()  # type: ignore
+        start_pose.p = gymapi.Vec3(*pos)  # type: ignore
+        start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)  # type: ignore
 
         # NOTE: Domain randomization code was here. Search for self.cfg.domain_rand.has_domain_rand in the original repos.
 
@@ -361,7 +363,7 @@ class HumanoidPHC:
         masses = torch.tensor(mass_ind)
         masses = [masses[group].sum() for group in LIMB_WEIGHT_GROUP]
         humanoid_limb_weight = torch.tensor(limb_lengths + masses)
-        self.humanoid_limb_and_weights.append(humanoid_limb_weight)  # ZL: attach limb lengths and full body weight.
+        humanoid_limb_and_weights.append(humanoid_limb_weight)  # ZL: attach limb lengths and full body weight.
 
         self.gym.set_actor_dof_properties(env_ptr, humanoid_handle, dof_prop)
 
@@ -1214,14 +1216,14 @@ class HumanoidPHC:
     def _action_to_pd_targets(self, action):
         # NOTE: self.cfg.res_action is False by default
         if self.cfg.res_action:
-            pd_tar = self.ref_dof_pos + self._pd_action_scale * action
+            pd_target = self.ref_dof_pos + self._pd_action_scale * action
             pd_lower = self._dof_pos - np.pi / 2
             pd_upper = self._dof_pos + np.pi / 2
-            pd_tar = torch.maximum(torch.minimum(pd_tar, pd_upper), pd_lower)
+            pd_target = torch.maximum(torch.minimum(pd_target, pd_upper), pd_lower)
         else:
-            pd_tar = self._pd_action_offset + self._pd_action_scale * action
+            pd_target = self._pd_action_offset + self._pd_action_scale * action
 
-        return pd_tar
+        return pd_target
 
     def _compute_reward(self):
         body_pos = self._rigid_body_pos

@@ -24,7 +24,7 @@ import pufferlib.cleanrl
 import pufferlib.vector
 
 from puffer_phc import clean_pufferl
-from puffer_phc.env_pufferl import PHCPufferEnv, make as env_creator
+from puffer_phc.clean_pufferl.env import PHCPufferEnv, make as env_creator
 from puffer_phc.envs.humanoid_phc import HumanoidPHC
 import puffer_phc.policies as policy_module
 
@@ -55,7 +55,7 @@ class AppConfig:
     checkpoint_path: Optional[str] = None
     track: bool = False
     wandb_project: str = "pufferlib"
-    ssc_lr: float = 0.0001
+    run_name: Optional[str] = None
     skip_resample: bool = False
     final_eval: bool = False
     exp_id: str = field(init=False)
@@ -292,12 +292,12 @@ def train(
     args: AppConfig,
     vec_env: PHCPufferEnv,
     policy: Union[pufferlib.cleanrl.Policy, pufferlib.cleanrl.RecurrentPolicy],
-    wandb=None,
-    skip_resample=False,
-    final_eval=False,
 ):
-    if wandb is None and args.track:
-        wandb = init_wandb(args.wandb_project, args.exp_id, args.env.name)
+    wandb = (
+        init_wandb(args.wandb_project, args.exp_id, args.run_name if args.run_name else args.env.name)
+        if args.track
+        else None
+    )
 
     train_config: TrainConfig = args.train
 
@@ -309,7 +309,7 @@ def train(
     os.makedirs(data_dir, exist_ok=True)
 
     while state.global_step < train_config.total_timesteps:
-        if not skip_resample and state.epoch > 0 and state.epoch % train_config.motion_resample_interval == 0:
+        if not args.skip_resample and state.epoch > 0 and state.epoch % train_config.motion_resample_interval == 0:
             # Evaluate the model every 600 epochs (train_config.checkpoint_interval)
             if state.epoch % train_config.checkpoint_interval == 0:
                 eval_stats = EvalStats(
@@ -358,7 +358,7 @@ def train(
     uptime = state.profile.uptime
 
     # Final evaluation
-    if final_eval:
+    if args.final_eval:
         eval_stats = EvalStats(vec_env)
         rollout(vec_env, policy, eval_stats)
         results.update(eval_stats.update_env_and_close())

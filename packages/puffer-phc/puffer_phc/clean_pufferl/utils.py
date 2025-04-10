@@ -1,3 +1,11 @@
+import os
+import random
+
+import torch
+import numpy as np
+
+from puffer_phc.config import TrainConfig
+
 from dataclasses import asdict
 
 import rich
@@ -5,6 +13,60 @@ from rich.console import Console
 from rich.table import Table
 
 import numpy as np
+
+
+def save_checkpoint(uncompiled_policy, optimizer, train_cfg: TrainConfig, exp_id: str, epoch: int, global_step: int):
+    path = os.path.join(train_cfg.data_dir, exp_id)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    model_name = f"model_{epoch:06d}.pt"
+    model_path = os.path.join(path, model_name)
+    if os.path.exists(model_path):
+        return model_path
+
+    checkpoint = {"config": asdict(train_cfg), "state_dict": uncompiled_policy.state_dict()}
+    torch.save(checkpoint, model_path)
+
+    checkpoint_state = {
+        "optimizer_state_dict": optimizer.state_dict(),
+        "global_step": global_step,
+        "agent_step": global_step,
+        "update": epoch,
+        "model_name": model_name,
+        "exp_id": exp_id,
+    }
+    state_path = os.path.join(path, "trainer_state.pt")
+    torch.save(checkpoint_state, state_path + ".tmp")
+    os.rename(state_path + ".tmp", state_path)
+    return model_path
+
+
+def try_load_checkpoint(policy, optimizer, train_cfg: TrainConfig, exp_id: str):
+    path = os.path.join(train_cfg.data_dir, exp_id)
+    if not os.path.exists(path):
+        print("No checkpoints found. Assuming new experiment")
+        return
+
+    trainer_path = os.path.join(path, "trainer_state.pt")
+    resume_state = torch.load(trainer_path)
+    model_path = os.path.join(path, resume_state["model_name"])
+    policy.uncompiled.load_state_dict(model_path, map_location=train_cfg.device)
+    optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+    print(f"Loaded checkpoint {resume_state['model_name']}")
+
+
+def count_params(policy):
+    return sum(p.numel() for p in policy.parameters() if p.requires_grad)
+
+
+def seed_everything(seed, torch_deterministic):
+    print(f"Seeding Everything with seed: {seed}" + ("and torch_deterministic" if torch_deterministic else ""))
+    random.seed(seed)
+    np.random.seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = torch_deterministic
 
 
 ROUND_OPEN = rich.box.Box("╭──╮\n│  │\n│  │\n│  │\n│  │\n│  │\n│  │\n╰──╯\n")

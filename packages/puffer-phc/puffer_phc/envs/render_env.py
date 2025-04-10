@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from puffer_phc import ASSET_DIR
+from puffer_phc.config import EnvConfig
 from puffer_phc.envs.humanoid_phc import HumanoidPHC
 from puffer_phc.torch_utils import to_torch, exp_map_to_quat
 
@@ -27,28 +28,23 @@ PERTURB_OBJS = [
 
 
 def agt_color(aidx):
-    return matplotlib.colors.to_rgb(plt.rcParams["axes.prop_cycle"].by_key()["color"][aidx % 10])
+    return matplotlib.colors.to_rgb(plt.rcParams["axes.prop_cycle"].by_key()["color"][aidx % 10])  # type: ignore
 
 
 class HumanoidRenderEnv(HumanoidPHC):
     def __init__(
         self,
-        cfg,
-        sim_params=None,
-        physics_engine=gymapi.SIM_PHYSX,
-        device_type="cuda",
-        device_id=0,  # Allow multi-gpu setting
-        headless=True,
+        cfg: EnvConfig,
     ):
         ### Flags like
         self.flag_server_mode = False
         self.flag_show_traj = True
         self.flag_add_proj = False
 
-        # Reset the init state to the start of the motion
-        cfg["env"]["state_init"] = "Start"
+        # TODO(howird): Reset the init state to the start of the motion
+        # cfg["env"]["state_init"] = "Start"
 
-        super().__init__(cfg, sim_params, physics_engine, device_type, device_id, headless)
+        super().__init__(cfg)
 
         # If running with a viewer, set up keyboard shortcuts and camera
         self._create_viewer()
@@ -109,12 +105,12 @@ class HumanoidRenderEnv(HumanoidPHC):
             elif evt.action == "apply_force" and evt.value > 0:
                 forces = torch.zeros(
                     (1, self._rigid_body_state.shape[0], 3),
-                    device=self.device,
+                    device=self.cfg.device,
                     dtype=torch.float,
                 )
                 torques = torch.zeros(
                     (1, self._rigid_body_state.shape[0], 3),
-                    device=self.device,
+                    device=self.cfg.device,
                     dtype=torch.float,
                 )
                 # forces[:, 8, :] = -800
@@ -126,13 +122,13 @@ class HumanoidRenderEnv(HumanoidPHC):
                     self.sim,
                     gymtorch.unwrap_tensor(forces),
                     gymtorch.unwrap_tensor(torques),
-                    gymapi.ENV_SPACE,
+                    gymapi.ENV_SPACE,  # type: ignore
                 )
             elif evt.action == "prev_env" and evt.value > 0:
-                self.viewing_env_idx = (self.viewing_env_idx - 1) % min(self.num_envs, 10)
+                self.viewing_env_idx = (self.viewing_env_idx - 1) % min(self.cfg.num_envs, 10)
                 print("\nShowing env: ", self.viewing_env_idx)
             elif evt.action == "next_env" and evt.value > 0:
-                self.viewing_env_idx = (self.viewing_env_idx + 1) % min(self.num_envs, 10)
+                self.viewing_env_idx = (self.viewing_env_idx + 1) % min(self.cfg.num_envs, 10)
                 print("\nShowing env: ", self.viewing_env_idx)
             elif evt.action == "resample_motion" and evt.value > 0:
                 self.resample_motions()
@@ -159,17 +155,17 @@ class HumanoidRenderEnv(HumanoidPHC):
                     self.sim,
                     self.envs[self.viewing_env_idx],
                     self.recorder_camera_handles[self.viewing_env_idx],
-                    gymapi.IMAGE_COLOR,
+                    gymapi.IMAGE_COLOR,  # type: ignore
                 )
                 self.color_image = color_image.reshape(color_image.shape[0], -1, 4)
 
                 if "writer" not in self.__dict__:
-                    curr_date_time = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+                    curr_date_time = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
                     self.curr_video_file_name = self._video_path % curr_date_time
                     self.curr_states_file_name = self._states_path % curr_date_time
                     self.writer = imageio.get_writer(
                         self.curr_video_file_name,
-                        fps=int(1 / self.dt),
+                        fps=int(1 / self.isaac_base.dt),
                         macro_block_size=None,
                     )
                 self.writer.append_data(self.color_image)
@@ -236,7 +232,7 @@ class HumanoidRenderEnv(HumanoidPHC):
         states_out = osp.join("output", "states")
         os.makedirs(rendering_out, exist_ok=True)
         os.makedirs(states_out, exist_ok=True)
-        self.cfg_name = self.cfg["exp_name"]
+        self.cfg_name = self.cfg.exp_name
         self._video_path = osp.join(rendering_out, f"{self.cfg_name}-%s.mp4")
         self._states_path = osp.join(states_out, f"{self.cfg_name}-%s.pkl")
         # self.gym.draw_env_rigid_contacts(self.viewer, self.envs[1], gymapi.Vec3(0.9, 0.3, 0.3), 1.0, True)
@@ -251,7 +247,7 @@ class HumanoidRenderEnv(HumanoidPHC):
 
     def _create_envs(self):
         if self.viewer or self.flag_server_mode:
-            self._marker_handles = [[] for _ in range(self.num_envs)]
+            self._marker_handles = [[] for _ in range(self.cfg.num_envs)]
             self._load_marker_asset()
 
         if self.flag_add_proj:
@@ -298,8 +294,8 @@ class HumanoidRenderEnv(HumanoidPHC):
         large_asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
         self._large_proj_asset = self.gym.load_asset(self.sim, asset_root, large_asset_file, large_asset_options)
 
-    def _build_single_env(self, env_id, env_ptr, humanoid_asset, dof_prop):
-        super()._build_single_env(env_id, env_ptr, humanoid_asset, dof_prop)
+    def _build_single_env(self, env_id, env_ptr, humanoid_asset, dof_prop, humanoid_limb_and_weights):
+        super()._build_single_env(env_id, env_ptr, humanoid_asset, dof_prop, humanoid_limb_and_weights)
 
         if self.viewer or self.flag_server_mode:
             self._build_marker(env_id, env_ptr)
@@ -315,7 +311,7 @@ class HumanoidRenderEnv(HumanoidPHC):
                 self._marker_asset,
                 default_pose,
                 "marker",
-                self.num_envs + 10,
+                self.cfg.num_envs + 10,
                 1,
                 0,
             )
@@ -353,20 +349,22 @@ class HumanoidRenderEnv(HumanoidPHC):
                 proj_asset = self._small_proj_asset
             elif obj_type == "large":
                 proj_asset = self._large_proj_asset
+            else:
+                raise Exception()
 
             proj_handle = self.gym.create_actor(env_ptr, proj_asset, default_pose, "proj{:d}".format(i), env_id, 2)
             self._proj_handles.append(proj_handle)
 
     def _build_marker_state_tensors(self):
-        num_actors = self._root_states.shape[0] // self.num_envs
-        self._marker_states = self._root_states.view(self.num_envs, num_actors, self._root_states.shape[-1])[
+        num_actors = self._root_states.shape[0] // self.cfg.num_envs
+        self._marker_states = self._root_states.view(self.cfg.num_envs, num_actors, self._root_states.shape[-1])[
             ..., 1 : (1 + self.num_bodies), :
         ]
         self._marker_pos = self._marker_states[..., :3]
         self._marker_rotation = self._marker_states[..., 3:7]
 
         self._marker_actor_ids = self._humanoid_actor_ids.unsqueeze(-1) + to_torch(
-            self._marker_handles, dtype=torch.int32, device=self.device
+            self._marker_handles, dtype=torch.int32, device=self.cfg.device
         )
         self._marker_actor_ids = self._marker_actor_ids.flatten()
 
@@ -377,11 +375,11 @@ class HumanoidRenderEnv(HumanoidPHC):
     def change_char_color(self):
         colors = []
         offset = np.random.randint(0, 10)
-        for env_id in range(self.num_envs):
+        for env_id in range(self.cfg.num_envs):
             rand_cols = agt_color(env_id + offset)
             colors.append(rand_cols)
 
-        self.sample_char_color(torch.tensor(colors), torch.arange(self.num_envs))
+        self.sample_char_color(torch.tensor(colors), torch.arange(self.cfg.num_envs))
 
     def sample_char_color(self, cols, env_ids):
         for env_id in env_ids:
@@ -420,7 +418,9 @@ class HumanoidRenderEnv(HumanoidPHC):
 
         if self.flag_show_traj:
             motion_times = (
-                (self.progress_buf + 1) * self.dt + self._motion_start_times + self._motion_start_times_offset
+                (self.progress_buf + 1) * self.isaac_base.dt
+                + self._motion_start_times
+                + self._motion_start_times_offset
             )  # + 1 for target.
             motion_res = self._get_state_from_motionlib_cache(
                 self._sampled_motion_ids, motion_times, self._global_offset
@@ -452,16 +452,16 @@ class HumanoidRenderEnv(HumanoidPHC):
     # NOTE: Used in "Heading debug" above
     def init_root_points(self):
         # For debugging purpose
-        y = torch.tensor(np.linspace(-0.5, 0.5, 5), device=self.device, requires_grad=False)
-        x = torch.tensor(np.linspace(0, 1, 5), device=self.device, requires_grad=False)
+        y = torch.tensor(np.linspace(-0.5, 0.5, 5), device=self.cfg.device, requires_grad=False)
+        x = torch.tensor(np.linspace(0, 1, 5), device=self.cfg.device, requires_grad=False)
         grid_x, grid_y = torch.meshgrid(x, y)
 
-        self.num_root_points = grid_x.numel()
+        num_root_points = grid_x.numel()
         points = torch.zeros(
-            self.num_envs,
-            self.num_root_points,
+            self.cfg.num_envs,
+            num_root_points,
             3,
-            device=self.device,
+            device=self.cfg.device,
             requires_grad=False,
         )
         points[:, :, 0] = grid_x.flatten()
@@ -469,9 +469,11 @@ class HumanoidRenderEnv(HumanoidPHC):
         return points
 
     def _record_states(self):
-        self.state_record["ref_body_pos_subset"].append(self.ref_body_pos_subset.cpu().clone())
-        self.state_record["ref_body_pos_full"].append(self.ref_body_pos.cpu().clone())
+        # TODO(howird): figure out what ref_body_* stuff do
+        # self.state_record["ref_body_pos_subset"].append(self.ref_body_pos_subset.cpu().clone())
+        # self.state_record["ref_body_pos_full"].append(self.ref_body_pos.cpu().clone())
         # self.state_record['ref_dof_pos'].append(self.ref_dof_pos.cpu().clone())
+        pass
 
     def _write_states_to_file(self, file_name):
         self.state_record["skeleton_trees"] = self.skeleton_trees

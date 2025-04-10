@@ -1,7 +1,3 @@
-import os
-import random
-import pyximport
-
 from collections import defaultdict
 from typing import Union, Tuple, Dict, Any, List
 
@@ -25,9 +21,17 @@ from puffer_phc.clean_pufferl.structs import (
     Profile,
     Utilization,
 )
-from puffer_phc.clean_pufferl.pretty import abbreviate, print_dashboard
+from puffer_phc.clean_pufferl.utils import (
+    abbreviate,
+    print_dashboard,
+    seed_everything,
+    count_params,
+    save_checkpoint,
+)
 
 # For the fast Cython GAE implementation
+import pyximport
+
 pyximport.install(setup_args={"include_dirs": np.get_include()})
 from c_gae import compute_gae  # noqa
 
@@ -430,7 +434,9 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
             info.stats.clear()
 
         if info.epoch % train_cfg.checkpoint_interval == 0 or done_training:
-            save_checkpoint(components, info)
+            save_checkpoint(
+                components.uncompiled_policy, components.optimizer, train_cfg, info.exp_id, info.epoch, info.global_step
+            )
             info.msg = f"Checkpoint saved at update {info.epoch}"
 
 
@@ -440,64 +446,10 @@ def close(components: TrainComponents, info: TrainInfo, utilization: Utilization
     if info.wandb is not None:
         artifact_name = f"{info.exp_id}_model"
         artifact = info.wandb.Artifact(artifact_name, type="model")
-        model_path = save_checkpoint(components, info)
+        model_path = save_checkpoint(
+            components.uncompiled_policy, components.optimizer, info.config, info.exp_id, info.epoch, info.global_step
+        )
         artifact.add_file(model_path)
         # NOTE: PHC model is large to save for all sweep runs
         # components.wandb.run.log_artifact(artifact)
         info.wandb.finish()
-
-
-def save_checkpoint(components: TrainComponents, info: TrainInfo):
-    train_cfg = info.config
-    path = os.path.join(train_cfg.data_dir, info.exp_id)
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    model_name = f"model_{info.epoch:06d}.pt"
-    model_path = os.path.join(path, model_name)
-    if os.path.exists(model_path):
-        return model_path
-
-    checkpoint = {"config": info.config, "state_dict": components.uncompiled_policy.state_dict()}
-    torch.save(checkpoint, model_path)
-
-    checkpoint_state = {
-        "optimizer_state_dict": components.optimizer.state_dict(),
-        "global_step": info.global_step,
-        "agent_step": info.global_step,
-        "update": info.epoch,
-        "model_name": model_name,
-        "exp_id": info.exp_id,
-    }
-    state_path = os.path.join(path, "trainer_state.pt")
-    torch.save(checkpoint_state, state_path + ".tmp")
-    os.rename(state_path + ".tmp", state_path)
-    return model_path
-
-
-def try_load_checkpoint(components: TrainComponents, info: TrainInfo):
-    train_cfg = info.config
-    path = os.path.join(train_cfg.data_dir, info.exp_id)
-    if not os.path.exists(path):
-        print("No checkpoints found. Assuming new experiment")
-        return
-
-    trainer_path = os.path.join(path, "trainer_state.pt")
-    resume_state = torch.load(trainer_path)
-    model_path = os.path.join(path, resume_state["model_name"])
-    components.policy.uncompiled.load_state_dict(model_path, map_location=train_cfg.device)
-    components.optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-    print(f"Loaded checkpoint {resume_state['model_name']}")
-
-
-def count_params(policy):
-    return sum(p.numel() for p in policy.parameters() if p.requires_grad)
-
-
-def seed_everything(seed, torch_deterministic):
-    print(f"Seeding Everything with seed: {seed}" + ("and torch_deterministic" if torch_deterministic else ""))
-    random.seed(seed)
-    np.random.seed(seed)
-    if seed is not None:
-        torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = torch_deterministic
