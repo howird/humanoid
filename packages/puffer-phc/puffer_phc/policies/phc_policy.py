@@ -1,3 +1,4 @@
+from typing import Callable, Dict, Sequence, List, Optional
 import torch
 from torch import nn
 
@@ -6,40 +7,32 @@ from pufferlib.pytorch import layer_init
 from puffer_phc.policies.discriminator_policy import DiscriminatorPolicy
 
 
+def mlp(layer_sizes: Sequence[int], activation: Callable, **activation_kwargs: Optional[Dict]) -> List[nn.Module]:
+    layers = []
+
+    for a, b in zip(layer_sizes[:-2], layer_sizes[1:-1]):
+        layers.append(layer_init(nn.Linear(a, b)))
+        layers.append(activation(**activation_kwargs))
+
+    layers.append(layer_init(nn.Linear(layer_sizes[-2], layer_sizes[-1])))
+
+    return layers
+
+
 class PHCPolicy(DiscriminatorPolicy):
-    def __init__(self, env, hidden_size=512):
+    def __init__(self, env, hidden_size: int, layer_sizes: Sequence[int]):
         super().__init__(env, hidden_size)
 
         # NOTE: Original PHC network + LayerNorm
         self.actor_mlp = nn.Sequential(
-            layer_init(nn.Linear(self.input_size, 2048)),
-            nn.SiLU(),
-            layer_init(nn.Linear(2048, 1536)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1536, 1024)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1024, 1024)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1024, 512)),
-            nn.SiLU(),
-            layer_init(nn.Linear(512, hidden_size)),
+            *mlp([self.input_size] + list(layer_sizes) + [hidden_size], nn.SiLU),
             nn.LayerNorm(hidden_size),
             nn.SiLU(),
         )
 
         # NOTE: Original PHC network + LayerNorm
         self.critic_mlp = nn.Sequential(
-            layer_init(nn.Linear(self.input_size, 2048)),
-            nn.SiLU(),
-            layer_init(nn.Linear(2048, 1536)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1536, 1024)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1024, 1024)),
-            nn.SiLU(),
-            layer_init(nn.Linear(1024, 512)),
-            nn.SiLU(),
-            layer_init(nn.Linear(512, hidden_size)),
+            *mlp([self.input_size] + list(layer_sizes) + [hidden_size], nn.SiLU),
             nn.LayerNorm(hidden_size),
             nn.SiLU(),
             layer_init(nn.Linear(hidden_size, 1), std=0.01),

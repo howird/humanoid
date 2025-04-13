@@ -10,7 +10,7 @@ import pufferlib.pytorch
 import pufferlib.cleanrl
 
 from puffer_phc.config import TrainConfig, EnvConfig
-from puffer_phc.env_pufferl import PHCPufferEnv
+from puffer_phc.clean_pufferl.env import PHCPufferEnv
 
 from puffer_phc.clean_pufferl.structs import (
     Experience,

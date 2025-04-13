@@ -15,7 +15,7 @@ import pufferlib.pytorch
 import pufferlib.cleanrl
 
 from puffer_phc.config import TrainConfig
-from puffer_phc.env_pufferl import PHCPufferEnv
+from puffer_phc.clean_pufferl.env import PHCPufferEnv
 
 torch.set_float32_matmul_precision("high")
 

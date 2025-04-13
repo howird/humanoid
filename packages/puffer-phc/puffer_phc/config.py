@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Literal
+from typing import Optional, Literal, Tuple
 
 from tyro.conf import Suppress, Fixed
 
@@ -139,6 +139,7 @@ class PolicyConfig:
     """Policy configuration"""
 
     hidden_size: int = 512
+    layer_sizes: Tuple[int, ...] = (2048, 1536, 1024, 1024, 512)
 
 
 @dataclass

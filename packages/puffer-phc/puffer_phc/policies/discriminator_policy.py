@@ -7,7 +7,7 @@ from puffer_phc.policies.running_norm import RunningNorm
 
 
 class DiscriminatorPolicy(nn.Module):
-    def __init__(self, env, hidden_size=512):
+    def __init__(self, env, hidden_size):
         super().__init__()
         self.is_continuous = True
         self._deterministic_action = False
