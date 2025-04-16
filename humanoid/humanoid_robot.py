@@ -14,3 +14,4 @@ class HumanoidRobot(BaseAgent):
     uid = "humanoid_robot"
     mjcf_path = MJCF_PATH
     group_collisions_by_depth = True
+    fix_root_link = True

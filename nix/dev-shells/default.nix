@@ -9,10 +9,13 @@ mkShell rec {
 
   VK_ICD_FILENAMES = "/run/opengl-driver/share/vulkan/icd.d/nvidia_icd.x86_64.json";
   __EGL_VENDOR_LIBRARY_FILENAMES = "/run/opengl-driver/share/glvnd/egl_vendor.d/10_nvidia.json";
+  SAPIEN_VULKAN_LIBRARY_PATH = "/run/current-system/sw/lib/libvulkan.so.1";
+  # SAPIEN_VULKAN_LIBRARY_PATH = "${vulkan-loader}/lib/libvulkan.so.1";
+
+
   LD_LIBRARY_PATH = lib.makeLibraryPath [
     "/run/opengl-driver"
-    vulkan-loader
-    wayland
+  #   wayland
   ];
 
   venvDir = "./env";
@@ -24,7 +27,5 @@ mkShell rec {
     pybullet
     debugpy
   ] ++ (with pkgs; [
-    # vulkan-loader
-    # wayland
   ]);
 }
