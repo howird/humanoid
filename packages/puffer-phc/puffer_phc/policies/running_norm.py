@@ -3,7 +3,7 @@ from torch import nn
 
 
 class RunningNorm(nn.Module):
-    def __init__(self, shape: int, epsilon=1e-5, clip=10.0):
+    def __init__(self, shape: int, epsilon: float = 1e-5, clip: float = 10.0):
         super().__init__()
 
         self.register_buffer("running_mean", torch.zeros((1, shape), dtype=torch.float32))

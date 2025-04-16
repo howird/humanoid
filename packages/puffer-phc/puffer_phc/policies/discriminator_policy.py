@@ -1,3 +1,5 @@
+import abc
+
 import torch
 from torch import nn
 
@@ -6,7 +8,7 @@ from pufferlib.pytorch import layer_init
 from puffer_phc.policies.running_norm import RunningNorm
 
 
-class DiscriminatorPolicy(nn.Module):
+class DiscriminatorPolicy(nn.Module, abc.ABC):
     def __init__(self, env, hidden_size):
         super().__init__()
         self.is_continuous = True
@@ -60,9 +62,11 @@ class DiscriminatorPolicy(nn.Module):
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
+    @abc.abstractclassmethod
     def encode_observations(self, obs):
         raise NotImplementedError
 
+    @abc.abstractclassmethod
     def decode_actions(self, hidden, lookup=None):
         raise NotImplementedError
 

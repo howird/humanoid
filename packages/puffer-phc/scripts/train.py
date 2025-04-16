@@ -58,7 +58,7 @@ class AppConfig:
     run_name: Optional[str] = None
     skip_resample: bool = False
     final_eval: bool = False
-    exp_id: str = field(init=False)
+    exp_id: str = ""
 
     # Configuration sections
     env: EnvConfig = field(default_factory=EnvConfig)
@@ -69,7 +69,8 @@ class AppConfig:
     debug: DebugConfig = field(default_factory=DebugConfig)
 
     def __post_init__(self):
-        self.exp_id = self.env.name + "-" + str(uuid.uuid4())[:8]
+        if not self.exp_id:
+            self.exp_id = self.env.name + "-" + str(uuid.uuid4())[:8]
 
 
 class EvalStats:
@@ -262,15 +263,15 @@ def make_policy(
 ) -> Union[pufferlib.cleanrl.Policy, pufferlib.cleanrl.RecurrentPolicy]:
     """Creates pufferlib policy, checking whether to use RNN based AppConfig.r"""
     policy_cls = getattr(policy_module, args.policy_name)
-    policy = policy_cls(env, **asdict(args.policy))
+    policy = policy_cls(env, cfg=args.policy, device=args.train.device)
     if args.rnn_name:
         rnn_cls = getattr(policy_module, args.rnn_name)
         policy = rnn_cls(env, policy, **asdict(args.rnn))
-        policy = pufferlib.cleanrl.RecurrentPolicy(policy)
+        puffer_policy = pufferlib.cleanrl.RecurrentPolicy(policy)
     else:
-        policy = pufferlib.cleanrl.Policy(policy)
+        puffer_policy = pufferlib.cleanrl.Policy(policy)
 
-    return policy.to(args.train.device)
+    return puffer_policy.to(args.train.device)
 
 
 def init_wandb(project_name: str, exp_id: str, env_name: str, resume=True):
