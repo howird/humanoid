@@ -632,12 +632,14 @@ class HumanoidPHC:
             step_dt=self.isaac_base.dt,
             is_deterministic=self.flag_debug,
         )
-        self._motion_train_lib = MotionLibSMPL(motion_lib_cfg)
+        self._motion_train_lib = MotionLibSMPL(
+            motion_lib_cfg, self.cfg.smpl_model_dir
+        )  # TODO(howird): make MotionLibSMPLConfig
         self._motion_lib = self._motion_train_lib
 
         # TODO: Use motion_test_file for eval?
         motion_lib_cfg.im_eval = True
-        self._motion_eval_lib = MotionLibSMPL(motion_lib_cfg)
+        self._motion_eval_lib = MotionLibSMPL(motion_lib_cfg, self.cfg.smpl_model_dir)
 
         # When loading the motions the first time, use even sampling
         interval = self.num_unique_motions / (self.cfg.num_envs + 50)  # 50 is arbitrary

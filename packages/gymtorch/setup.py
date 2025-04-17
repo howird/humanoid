@@ -15,7 +15,6 @@ cflags = [
 setup(
     name="gymtorch",
     packages=["gymtorch"],
-    version="0.1.0",
     description="Made Isaacgym's gymtorch a separate compiled module for easier debugging",
     install_requires=["torch", "setuptools"],
     ext_modules=[
@@ -26,4 +25,11 @@ setup(
         ),
     ],
     cmdclass={"build_ext": BuildExtension},
+    # from isaacgym setup.py
+    version="1.0.preview4",
+    author="NVIDIA CORPORATION",
+    author_email="",
+    url="http://developer.nvidia.com/isaac-gym",
+    license="Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.",
+    python_requires=">=3.6,<3.9",
 )

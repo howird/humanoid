@@ -1,3 +1,20 @@
+###
+### Project
+###
+
+data/
+weights/
+result*/
+wandb/
+experiments/
+output/
+packages/isaacgym
+!packages/isaacgym/pyproject.toml
+
+###
+### Python
+###
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

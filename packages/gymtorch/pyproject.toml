@@ -1,0 +1,7 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gymtorch"
+dynamic = ["version", "description", "authors", "requires-python", "dependencies", "license"]

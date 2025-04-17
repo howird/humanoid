@@ -674,17 +674,16 @@ class MotionLibBase:
 
 
 class MotionLibSMPL(MotionLibBase):
-    def __init__(self, motion_lib_cfg):
+    def __init__(self, motion_lib_cfg, smpl_model_dir):
         super().__init__(motion_lib_cfg=motion_lib_cfg)
 
-        data_dir = str(ROOT_DIR / "smpl")
-        if osp.exists(data_dir):
+        if osp.exists(smpl_model_dir):
             if motion_lib_cfg.smpl_type == "smpl":
-                # NOTE: SMPL model files must be present in the data_dir.
+                # NOTE: SMPL model files must be present in the smpl_model_dir.
                 # Download from https://smpl.is.tue.mpg.de/
-                smpl_parser_n = SMPL_Parser(model_path=data_dir, gender="neutral")
-                smpl_parser_m = SMPL_Parser(model_path=data_dir, gender="male")
-                smpl_parser_f = SMPL_Parser(model_path=data_dir, gender="female")
+                smpl_parser_n = SMPL_Parser(model_path=smpl_model_dir, gender="neutral")
+                smpl_parser_m = SMPL_Parser(model_path=smpl_model_dir, gender="male")
+                smpl_parser_f = SMPL_Parser(model_path=smpl_model_dir, gender="female")
             else:
                 raise NotImplementedError(f"SMPL type {motion_lib_cfg.smpl_type} not implemented")
 

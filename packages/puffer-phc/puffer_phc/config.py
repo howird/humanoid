@@ -74,6 +74,7 @@ class EnvConfig(DeviceConfig):
     """Environment configuration"""
 
     name: str = "humanoid_phc"
+    smpl_model_dir: str = "data/smpl"
     motion_file: str = "data/motion/amass_train_take6_upright.pkl"
     num_envs: int = 4096
     headless: bool = True
