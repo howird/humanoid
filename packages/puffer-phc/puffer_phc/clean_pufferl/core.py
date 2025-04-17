@@ -29,11 +29,7 @@ from puffer_phc.clean_pufferl.utils import (
     save_checkpoint,
 )
 
-# For the fast Cython GAE implementation
-import pyximport
-
-pyximport.install(setup_args={"include_dirs": np.get_include()})
-from c_gae import compute_gae  # noqa
+from puffer_advantage import compute_gae
 
 torch.set_float32_matmul_precision("high")
 
