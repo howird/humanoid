@@ -8,7 +8,7 @@ result*/
 wandb/
 experiments/
 output/
-packages/isaacgym
+packages/isaacgym/*
 !packages/isaacgym/pyproject.toml
 
 ###
