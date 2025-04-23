@@ -132,6 +132,7 @@ class EnvConfig(DeviceConfig):
 
     @property
     def num_agents(self) -> int:
+        # 1 agent per env
         return self.num_envs
 
 
@@ -171,16 +172,19 @@ class TrainConfig(DeviceConfig):
 
     num_workers: int = 1
     num_envs: int = 1
+
     batch_size: int = 131072
     minibatch_size: int = 32768
+    bptt_horizon: int = 8
+    num_minibatches: int = field(init=False)
+    minibatch_rows: int = field(init=False)
 
+    update_epochs: int = 4
     learning_rate: float = 0.0001
     anneal_lr: bool = False
     lr_decay_rate: float = 1.5e-4
     lr_decay_floor: float = 0.2
 
-    update_epochs: int = 4
-    bptt_horizon: int = 8
     gae_lambda: float = 0.2
     gamma: float = 0.98
     clip_coef: float = 0.01
@@ -195,3 +199,14 @@ class TrainConfig(DeviceConfig):
 
     # 'registers' inherited DeviceConfig.device with dataclasses
     device: str = field(init=False)  # type: ignore
+
+    def __post_init__(self):
+        num_minibatches = self.batch_size / self.minibatch_size
+        self.num_minibatches = int(num_minibatches)
+        if self.num_minibatches != num_minibatches:
+            raise ValueError("batch_size must be divisible by minibatch_size")
+
+        minibatch_rows = self.minibatch_size / self.bptt_horizon
+        self.minibatch_rows = int(minibatch_rows)
+        if self.minibatch_rows != minibatch_rows:
+            raise ValueError("minibatch_size must be divisible by bptt_horizon")

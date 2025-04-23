@@ -28,15 +28,17 @@ class Experience:
         batch_size,
         bptt_horizon,
         minibatch_size,
+        num_minibatches,
+        minibatch_rows,
         obs_shape,
         obs_dtype,
         atn_shape,
         atn_dtype,
-        cpu_offload=False,
-        device="cuda",
-        lstm=None,
-        lstm_total_agents=0,
-        use_amp_obs=False,
+        cpu_offload,
+        device,
+        lstm,
+        lstm_total_agents,
+        use_amp_obs,
         amp_obs_size=1960,
         amp_obs_update_prob=0.01,
     ):
@@ -72,20 +74,13 @@ class Experience:
             self.lstm_h = torch.zeros(shape).to(device)
             self.lstm_c = torch.zeros(shape).to(device)
 
-        num_minibatches = batch_size / minibatch_size
-        self.num_minibatches = int(num_minibatches)
-        if self.num_minibatches != num_minibatches:
-            raise ValueError("batch_size must be divisible by minibatch_size")
-
-        minibatch_rows = minibatch_size / bptt_horizon
-        self.minibatch_rows = int(minibatch_rows)
-        if self.minibatch_rows != minibatch_rows:
-            raise ValueError("minibatch_size must be divisible by bptt_horizon")
-
+        self.num_minibatches = num_minibatches
+        self.minibatch_rows = minibatch_rows
         self.batch_size = batch_size
         self.bptt_horizon = bptt_horizon
         self.minibatch_size = minibatch_size
         self.device = device
+
         self.sort_keys = []
         self.ptr = 0
         self.step = 0
@@ -139,23 +134,31 @@ class Experience:
             .to(self.obs.device)
             .long()
         )
+
         self.b_idxs = self.b_idxs_obs.to(self.device)
         self.b_idxs_flat = self.b_idxs.reshape(self.num_minibatches, self.minibatch_size)
+
         self.sort_keys = []
         return idxs
 
     def flatten_batch(self):
         b_idxs, b_flat = self.b_idxs, self.b_idxs_flat
-        self.b_actions = self.actions.to(self.device, non_blocking=True)
-        self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
-        self.b_dones = self.dones.to(self.device, non_blocking=True)
-        self.b_truncated = self.truncateds.to(self.device, non_blocking=True)
-        self.b_values = self.values.to(self.device, non_blocking=True)
+
         self.b_obs = self.obs[self.b_idxs_obs]
+
+        self.b_actions = self.actions.to(self.device, non_blocking=True)
         self.b_actions = self.b_actions[b_idxs].contiguous()
+
+        self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
         self.b_logprobs = self.b_logprobs[b_idxs]
+
+        self.b_dones = self.dones.to(self.device, non_blocking=True)
         self.b_dones = self.b_dones[b_idxs]
+
+        self.b_truncated = self.truncateds.to(self.device, non_blocking=True)
         self.b_truncated = self.b_truncated[b_idxs]
+
+        self.b_values = self.values.to(self.device, non_blocking=True)
         self.b_values = self.b_values[b_flat]
 
         # AMP, only used for discriminator training

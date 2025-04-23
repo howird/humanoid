@@ -295,33 +295,37 @@ def train(
     policy: Union[pufferlib.cleanrl.Policy, pufferlib.cleanrl.RecurrentPolicy],
 ):
     wandb = (
-        init_wandb(args.wandb_project, args.exp_id, args.run_name if args.run_name else args.env.name)
+        init_wandb(
+            args.wandb_project,
+            args.exp_id,
+            args.run_name if args.run_name else args.env.name,
+        )
         if args.track
         else None
     )
 
     train_config: TrainConfig = args.train
 
-    components, state, utilization = clean_pufferl.create(
+    components, info, utilization = clean_pufferl.create(
         args.exp_id, args.train, args.env, vec_env, policy, wandb=wandb
     )
 
     data_dir = os.path.join(train_config.data_dir, args.exp_id)
     os.makedirs(data_dir, exist_ok=True)
 
-    while state.global_step < train_config.total_timesteps:
-        if not args.skip_resample and state.epoch > 0 and state.epoch % train_config.motion_resample_interval == 0:
+    while info.global_step < train_config.total_timesteps:
+        if not args.skip_resample and info.epoch > 0 and info.epoch % train_config.motion_resample_interval == 0:
             # Evaluate the model every 600 epochs (train_config.checkpoint_interval)
-            if state.epoch % train_config.checkpoint_interval == 0:
+            if info.epoch % train_config.checkpoint_interval == 0:
                 eval_stats = EvalStats(
                     vec_env,
-                    failed_save_path=os.path.join(data_dir, f"failed_{state.epoch:06d}.pkl"),
+                    failed_save_path=os.path.join(data_dir, f"failed_{info.epoch:06d}.pkl"),
                 )
                 rollout(vec_env, policy, eval_stats)
                 eval_results = eval_stats.update_env_and_close()
-                if state.wandb:
-                    eval_results["0verview/agent_steps"] = state.global_step
-                    eval_results["0verview/epoch"] = state.epoch
+                if info.wandb:
+                    eval_results["0verview/agent_steps"] = info.global_step
+                    eval_results["0verview/epoch"] = info.epoch
                     wandb.log(eval_results)
 
             # Resample motions every 200 epochs (train_config.motion_resample_interval)
@@ -334,38 +338,36 @@ def train(
                 components.experience.lstm_c[:] = 0
 
         # Collect data
-        results, _ = clean_pufferl.evaluate(components, state)
+        results, _ = clean_pufferl.evaluate(components, info)
 
         # Update obs running mean and std
         # During evaluate() and train(), the obs_norm is NOT updated.
-        rms_update_fn = getattr(components.policy.policy, "update_obs_rms", None)
-        if rms_update_fn:
+        if rms_update_fn := getattr(components.policy.policy, "update_obs_rms", None):
             rms_update_fn(components.experience.obs)
 
-        amp_rms_update_fn = getattr(components.policy.policy, "update_amp_obs_rms", None)
-        if state.use_amp_obs and amp_rms_update_fn:
+        if info.use_amp_obs and (amp_rms_update_fn := getattr(components.policy.policy, "update_amp_obs_rms", None)):
             amp_rms_update_fn(components.experience.amp_obs)
 
         # Update policy
-        clean_pufferl.train(components, state, utilization)
+        clean_pufferl.train(components, info, utilization)
 
         # Apply learning rate exp decay
-        if state.config.lr_decay_rate > 0:
-            decay = math.exp(-state.config.lr_decay_rate * state.epoch)
-            if decay < state.config.lr_decay_floor:
-                decay = state.config.lr_decay_floor
-            components.optimizer.param_groups[0]["lr"] = state.config.learning_rate * decay
+        if info.config.lr_decay_rate > 0:
+            decay = math.exp(-info.config.lr_decay_rate * info.epoch)
+            if decay < info.config.lr_decay_floor:
+                decay = info.config.lr_decay_floor
+            components.optimizer.param_groups[0]["lr"] = info.config.learning_rate * decay
 
-    uptime = state.profile.uptime
+    uptime = info.profile.uptime
 
     # Final evaluation
     if args.final_eval:
         eval_stats = EvalStats(vec_env)
         rollout(vec_env, policy, eval_stats)
         results.update(eval_stats.update_env_and_close())
-        if state.wandb:
-            results["0verview/agent_steps"] = state.global_step
-            results["0verview/epoch"] = state.epoch
+        if info.wandb:
+            results["0verview/agent_steps"] = info.global_step
+            results["0verview/epoch"] = info.epoch
             wandb.log(results)
 
     # NOTE: Not using standard eval
@@ -373,17 +375,19 @@ def train(
     # steps_to_eval = int(train_config.eval_timesteps)
     # batch_size = int(train_config.batch_size)
     # while steps_evaluated < steps_to_eval:
-    #     stats, _ = clean_pufferl.evaluate(components, state)
+    #     stats, _ = clean_pufferl.evaluate(components, info)
     #     steps_evaluated += batch_size
-    # clean_pufferl.mean_and_log(components, state)
+    # clean_pufferl.mean_and_log(components, info)
 
-    clean_pufferl.close(components, state, utilization)
+    clean_pufferl.close(components, info, utilization)
 
     return results, uptime
 
 
 def rollout(
-    vec_env: PHCPufferEnv, policy: Union[pufferlib.cleanrl.Policy, pufferlib.cleanrl.RecurrentPolicy], eval_stats=None
+    vec_env: PHCPufferEnv,
+    policy: Union[pufferlib.cleanrl.Policy, pufferlib.cleanrl.RecurrentPolicy],
+    eval_stats=None,
 ):
     # NOTE (Important): Using deterministic action for evaluation
     policy.policy.set_deterministic_action(True)  # Ugly... but...
@@ -397,13 +401,13 @@ def rollout(
             # TODO: hardcoded device
             obs = torch.as_tensor(obs).to("cuda")
             if hasattr(policy, "lstm"):
-                action, _, _, _, state = policy(obs, state)
+                action, _logprob, _entropy, _value, state = policy(obs, state)
             else:
-                action, _, _, _ = policy(obs)
+                action, _logprob, _entropy, _value = policy(obs)
 
             action = action.cpu().numpy().reshape(vec_env.action_space.shape)
 
-        obs, _, done, trunc, info = vec_env.step(action)
+        obs, _rew, done, trunc, info = vec_env.step(action)
 
         if hasattr(policy, "lstm"):
             # Reset lstm states for the reset

@@ -19,7 +19,28 @@ def make(cfg):
     return PHCPufferEnv(cfg)
 
 
-class PHCPufferEnv(pufferlib.PufferEnv):
+class PufferEnvBuffers:
+    observations: torch.Tensor
+    rewards: torch.Tensor
+    terminals: torch.Tensor
+    truncations: torch.Tensor
+    masks: torch.Tensor
+    actions: torch.Tensor
+
+    def __init__(self, obs_buf, rew_buf, reset_buf, num_agents, single_action_space_shape, device):
+        self.observations = obs_buf
+        self.rewards = rew_buf
+        self.terminals = torch.zeros(num_agents, dtype=torch.bool, device=device)
+        self.truncations = torch.zeros_like(reset_buf)
+        self.masks = torch.ones_like(reset_buf)
+        self.actions = torch.zeros((num_agents, *single_action_space_shape), dtype=torch.float, device=device)
+
+
+class PHCPufferEnv(pufferlib.PufferEnv, PufferEnvBuffers):
+    """Wrapper of HumanoidPHC for Pufferlib.
+    HACK: PufferEnvBuffers inherit is mostly just for typing purposes, may break something if PufferEnv calls `super().__init__()`
+    """
+
     def __init__(
         self,
         cfg,
@@ -38,15 +59,13 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.amp_observation_space = self.env.amp_observation_space if self.cfg.use_amp_obs else None
 
         # Check the buffer data types, match them to puffer
-        buffers = pufferlib.namespace(
-            observations=self.env.obs_buf,
-            rewards=self.env.rew_buf,
-            terminals=torch.zeros(self.num_agents, dtype=torch.bool, device=self.cfg.device),
-            truncations=torch.zeros_like(self.env.reset_buf),
-            masks=torch.ones_like(self.env.reset_buf),
-            actions=torch.zeros(
-                (self.num_agents, *self.single_action_space.shape), dtype=torch.float, device=self.cfg.device
-            ),
+        buffers = PufferEnvBuffers(
+            self.env.obs_buf,
+            self.env.rew_buf,
+            self.env.reset_buf,
+            self.cfg.num_agents,
+            self.single_action_space.shape,
+            self.cfg.device,
         )
 
         super().__init__(buffers)

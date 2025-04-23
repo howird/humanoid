@@ -59,18 +59,19 @@ def create(
     atn_dtype = vecenv.single_action_space.dtype
     total_agents = vecenv.num_agents
 
-    lstm = policy.lstm if hasattr(policy, "lstm") else None
     experience = Experience(
         train_cfg.batch_size,
         train_cfg.bptt_horizon,
         train_cfg.minibatch_size,
+        train_cfg.num_minibatches,
+        train_cfg.minibatch_rows,
         obs_shape,
         obs_dtype,
         atn_shape,
         atn_dtype,
         train_cfg.cpu_offload,
         train_cfg.device,
-        lstm,
+        policy.lstm if hasattr(policy, "lstm") else None,
         total_agents,
         env_cfg.use_amp_obs,
     )
@@ -124,7 +125,7 @@ def evaluate(components: TrainComponents, info: TrainInfo) -> Tuple[StatsData, D
 
     while not experience.full:
         with profile.env:
-            o, r, d, t, env_info, env_id, mask = components.vecenv.recv()
+            obses, rewards, dones, truncs, env_info, env_id, mask = components.vecenv.recv()
             env_id = env_id.tolist()
 
         with profile.eval_misc:
@@ -133,29 +134,29 @@ def evaluate(components: TrainComponents, info: TrainInfo) -> Tuple[StatsData, D
             else:
                 info.global_step += int(sum(mask))
 
-            o = torch.as_tensor(o)
-            o_device = o.to(train_cfg.device)
-            r = torch.as_tensor(r)
-            d = torch.as_tensor(d)
-            t = torch.as_tensor(t)
+            obses = torch.as_tensor(obses)
+            obses_device = obses.to(train_cfg.device)
+            rewards = torch.as_tensor(rewards)
+            dones = torch.as_tensor(dones)
+            truncs = torch.as_tensor(truncs)
 
         with profile.eval_forward, torch.no_grad():
             # TODO: In place-update should be faster. Leaking 7% speed max
             # Also should be using a cuda tensor to index
             if lstm_h is not None and lstm_c is not None:
                 # Reset the hidden states for the done/truncated envs
-                reset_envs = torch.logical_or(d, t)
+                reset_envs = torch.logical_or(dones, truncs)
                 if reset_envs.any():
                     lstm_h[:, reset_envs] = 0
                     lstm_c[:, reset_envs] = 0
 
                 h = lstm_h[:, env_id]
                 c = lstm_c[:, env_id]
-                actions, logprob, _, value, (h, c) = policy(o_device, (h, c))
+                actions, logprob, _entropy, value, (h, c) = policy(obses_device, (h, c))
                 lstm_h[:, env_id] = h
                 lstm_c[:, env_id] = c
             else:
-                actions, logprob, _, value = policy(o_device)
+                actions, logprob, _entropy, value = policy(obses_device)
 
             if train_cfg.device_type == "cuda":
                 torch.cuda.synchronize()
@@ -164,10 +165,10 @@ def evaluate(components: TrainComponents, info: TrainInfo) -> Tuple[StatsData, D
             value = value.flatten()
             actions = actions.cpu().numpy()
             mask = torch.as_tensor(mask)  # * policy.mask)
-            o = o if train_cfg.cpu_offload else o_device
+            obses = obses if train_cfg.cpu_offload else obses_device
 
-            amp_obs = components.vecenv.amp_obs if info.use_amp_obs else None
-            experience.store(o, amp_obs, value, actions, logprob, r, d, t, env_id, mask)
+            amp_obses = components.vecenv.amp_obs if info.use_amp_obs else None
+            experience.store(obses, amp_obses, value, actions, logprob, rewards, dones, truncs, env_id, mask)
 
             for i in env_info:
                 for k, v in pufferlib.utils.unroll_nested_dict(i):
@@ -213,8 +214,7 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
         rewards_np = experience.rewards_np[idxs]
         experience.flatten_batch()
 
-        if info.use_amp_obs:
-            amp_obs_demo = components.vecenv.fetch_amp_obs_demo()  # [num_envs, amp_obs_size]
+        if (amp_obs_demo := components.vecenv.fetch_amp_obs_demo()) is not None:
             amp_minibatch_size = amp_obs_demo.shape[0]
 
         # Mean bound loss attribute
@@ -224,8 +224,9 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
     # updated as often this way, but GAE is more accurate
     adversarial_reward = torch.zeros(experience.num_minibatches, train_cfg.minibatch_size).to(train_cfg.device)
 
-    discriminate = getattr(components.policy.policy, "discriminate", None)
-    if info.use_amp_obs and discriminate is not None:
+    if info.use_amp_obs and (discriminate := getattr(components.policy.policy, "discriminate", None)) is not None:
+        # TODO: Nans in adversarial reward and gae
+        adversarial_reward = torch.zeros(experience.num_minibatches, train_cfg.minibatch_size).to(train_cfg.device)
         with torch.no_grad():
             for mb in range(experience.num_minibatches):
                 disc_logits = discriminate(experience.b_amp_obs[mb]).squeeze()
@@ -281,10 +282,12 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
 
             with profile.train_forward:
                 if experience.lstm_h is not None:
-                    _, newlogprob, entropy, newvalue, lstm_state = components.policy(obs, info=lstm_state, action=atn)
+                    _actions, newlogprob, entropy, newvalue, lstm_state = components.policy(
+                        obs, info=lstm_state, action=atn
+                    )
                     lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:
-                    _, newlogprob, entropy, newvalue = components.policy(
+                    _actions, newlogprob, entropy, newvalue = components.policy(
                         obs.reshape(-1, *components.vecenv.single_observation_space.shape),
                         action=atn,
                     )
