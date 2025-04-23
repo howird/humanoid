@@ -208,10 +208,10 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
 
     with profile.train_misc:
         idxs = experience.sort_training_data()
-        dones_np = experience.dones_np[idxs]
-        # trunc_np = experience.truncateds_np[idxs]
-        values_np = experience.values_np[idxs]
-        rewards_np = experience.rewards_np[idxs]
+        dones = experience.dones[idxs]
+        # trunc = experience.truncateds[idxs]
+        values = experience.values[idxs]
+        rewards = experience.rewards[idxs]
         experience.flatten_batch()
 
         if (amp_obs_demo := components.vecenv.fetch_amp_obs_demo()) is not None:
@@ -222,7 +222,6 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
 
     # Compute adversarial reward. Note: discriminator doesn't get
     # updated as often this way, but GAE is more accurate
-    adversarial_reward = torch.zeros(experience.num_minibatches, train_cfg.minibatch_size).to(train_cfg.device)
 
     if info.use_amp_obs and (discriminate := getattr(components.policy.policy, "discriminate", None)) is not None:
         # TODO: Nans in adversarial reward and gae
@@ -235,25 +234,22 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
                     torch.maximum(1 - prob, torch.tensor(0.0001, device=train_cfg.device))
                 )
 
-    # TODO: Nans in adversarial reward and gae
-    adversarial_reward_np = adversarial_reward.cpu().numpy().ravel()
+        # For motion imitation, done is True ONLY when the env is terminated early.
+        # Successful replay of motions will get done=False, truncation=True
+        # Since gae is using only dones, the advantages for truncated steps are
+        # computed as the same as the nonterminal steps.
+        # NOTE: The imitation reward and adversarial reward are equally weighted.
+        advantages = compute_gae(values, rewards + adversarial_reward, dones, train_cfg.gamma, train_cfg.gae_lambda)
+    else:
+        advantages = compute_gae(values, rewards, dones, train_cfg.gamma, train_cfg.gae_lambda)
 
-    # For motion imitation, done is True ONLY when the env is terminated early.
-    # Successful replay of motions will get done=False, truncation=True
-    # Since gae is using only dones, the advantages for truncated steps are
-    # computed as the same as the nonterminal steps.
-    # NOTE: The imitation reward and adversarial reward are equally weighted.
-    advantages_np = compute_gae(
-        dones_np, values_np, rewards_np + adversarial_reward_np, train_cfg.gamma, train_cfg.gae_lambda
-    )
-
-    advantages = torch.as_tensor(advantages_np).to(train_cfg.device)
     experience.b_advantages = (
-        advantages.reshape(experience.minibatch_rows, experience.num_minibatches, experience.bptt_horizon)
+        advantages.to(train_cfg.device)
+        .reshape(experience.minibatch_rows, experience.num_minibatches, experience.bptt_horizon)
         .transpose(0, 1)
         .reshape(experience.num_minibatches, experience.minibatch_size)
     )
-    experience.returns_np = advantages_np + experience.values_np
+    experience.returns = advantages + experience.values
     experience.b_returns = experience.b_advantages + experience.b_values
 
     # Optimizing the policy and value network
@@ -310,6 +306,7 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
                     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
                 # Policy loss
+                # TODO(howird): ppo?
                 pg_loss1 = -adv * ratio
                 pg_loss2 = -adv * torch.clamp(ratio, 1 - train_cfg.clip_coef, 1 + train_cfg.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
@@ -406,8 +403,8 @@ def train(components: TrainComponents, info: TrainInfo, utilization: Utilization
             lrnow = frac * train_cfg.learning_rate
             components.optimizer.param_groups[0]["lr"] = lrnow
 
-        y_pred = experience.values_np
-        y_true = experience.returns_np
+        y_pred = experience.values.cpu().numpy()
+        y_true = experience.returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
         losses.explained_variance = explained_var

@@ -8,8 +8,8 @@
 import numpy as np
 cimport numpy as cnp
 
-def compute_gae(cnp.ndarray dones, cnp.ndarray values,
-        cnp.ndarray rewards, float gamma, float gae_lambda):
+def compute_gae(cnp.ndarray values, cnp.ndarray rewards,
+        cnp.ndarray dones, float gamma, float gae_lambda):
     '''Fast Cython implementation of Generalized Advantage Estimation (GAE)'''
     cdef int num_steps = len(rewards)
     cdef cnp.ndarray advantages = np.zeros(num_steps, dtype=np.float32)

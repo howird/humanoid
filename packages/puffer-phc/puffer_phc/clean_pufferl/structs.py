@@ -60,12 +60,12 @@ class Experience:
         self.values = torch.zeros(batch_size, pin_memory=pin)
 
         # self.obs_np = np.asarray(self.obs)
-        self.actions_np = np.asarray(self.actions)
-        self.logprobs_np = np.asarray(self.logprobs)
-        self.rewards_np = np.asarray(self.rewards)
-        self.dones_np = np.asarray(self.dones)
-        self.truncateds_np = np.asarray(self.truncateds)
-        self.values_np = np.asarray(self.values)
+        # self.actions_np = np.asarray(self.actions)
+        # self.logprobs_np = np.asarray(self.logprobs)
+        # self.rewards_np = np.asarray(self.rewards)
+        # self.dones_np = np.asarray(self.dones)
+        # self.truncateds_np = np.asarray(self.truncateds)
+        # self.values_np = np.asarray(self.values)
 
         self.lstm_h = self.lstm_c = None
         if lstm is not None:
@@ -115,12 +115,13 @@ class Experience:
         if self.use_amp_obs:
             self.amp_obs[ptr:end] = amp_obs.to(self.amp_obs.device)[indices]
 
-        self.values_np[ptr:end] = value.cpu().numpy()[indices]
-        self.actions_np[ptr:end] = action[indices]
-        self.logprobs_np[ptr:end] = logprob.cpu().numpy()[indices]
-        self.rewards_np[ptr:end] = reward.cpu().numpy()[indices]
-        self.dones_np[ptr:end] = done.cpu().numpy()[indices]
-        self.truncateds_np[ptr:end] = trunc.cpu().numpy()[indices]
+        self.values[ptr:end] = value[indices]
+        self.actions[ptr:end] = action[indices]
+        self.logprobs[ptr:end] = logprob[indices]
+        self.rewards[ptr:end] = reward[indices]
+        self.dones[ptr:end] = done[indices]
+        self.truncateds[ptr:end] = trunc[indices]
+
         self.sort_keys.extend([(env_id[i], self.step) for i in indices])
         self.ptr = end
         self.step += 1

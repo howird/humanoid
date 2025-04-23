@@ -69,6 +69,7 @@ class HumanoidPHC:
         ### Env
         self._config_env()  # All env configs should be here
         self._create_ground_plane()
+
         # TODO: Testing putting the robots in the same env
         self._create_envs()
         self.gym.prepare_sim(self.sim)

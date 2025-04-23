@@ -106,10 +106,10 @@ class PHCPufferEnv(pufferlib.PufferEnv, PufferEnvBuffers):
 
         return self.observations, []
 
-    def step(self, actions_np):
+    def step(self, actions):
         if self.cfg.clip_actions:
-            actions_np = np.clip(actions_np, -1, 1)
-        self.actions[:] = torch.from_numpy(actions_np)
+            actions = np.clip(actions, -1, 1)
+        self.actions[:] = actions
 
         # obs, reward, done are put into the buffers
         self.env.step(self.actions)
