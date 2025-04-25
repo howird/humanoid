@@ -11,6 +11,7 @@ dependencies = [
     "isaacgym",
     "gymtorch",
     "hmr2",
+    "phalp",
 
     "wandb>=0.16.6,<0.17",
     "tyro>=0.8.14,<0.9",
@@ -28,6 +29,7 @@ puffer-phc = { workspace = true }
 isaacgym = { workspace = true }
 gymtorch = { workspace = true }
 hmr2 = { workspace = true }
+phalp = { workspace = true }
 chumpy = { git = "https://github.com/howird/chumpy" }
 
 [tool.uv.workspace]

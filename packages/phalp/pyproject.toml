@@ -1,0 +1,48 @@
+[project]
+name = "phalp"
+version = "0.1.3"
+description = "PHALP: A Python package for People Tracking in 3D"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "joblib",
+  "rich",
+  "einops",
+  "scenedetect[opencv]",
+  "hydra-core",
+  "av",
+  "numpy",
+  "chumpy",
+  "smplx",
+  "pyrender",
+  "opencv-python",
+  "yacs",
+  "scikit-image",
+  "scikit-learn",
+  "timm",
+  "webdataset",
+  "dill",
+  "pandas",
+
+  "detectron2 @ git+https://github.com/facebookresearch/detectron2",
+  "neural-renderer-pytorch @ git+https://github.com/shubham-goel/NMR.git",
+  "pytube @ git+https://github.com/pytube/pytube.git",
+  "pyopengl @ git+https://github.com/mmatl/pyopengl.git",
+]
+license = "MIT"
+authors = [
+  { name = "Jathushan Rajasegaran", email = "jathushan@berkeley.edu"}
+]
+
+[project.urls]
+Homepage = "https://github.com/brjathu/PHALP"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["phalp"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

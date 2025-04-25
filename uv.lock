@@ -18,6 +18,7 @@ members = [
     "hmr2",
     "humanoid",
     "isaacgym",
+    "phalp",
     "puffer-phc",
     "world-pose-viewer",
 ]
@@ -159,6 +160,26 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/b0/1367933a8532ee6ff8d63537de4f1177af4bff9f3e829baf7331f595bb24/attrs-25.3.0.tar.gz", hash = "sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b", size = 812032 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/06/bb80f5f86020c4551da315d78b3ab75e8228f89f0162f2c3a819e407941a/attrs-25.3.0-py3-none-any.whl", hash = "sha256:427318ce031701fea540783410126f03899a97ffc6f61596ad581ac2e40e3bc3", size = 63815 },
+]
+
+[[package]]
+name = "av"
+version = "12.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/f8/5adeeae0c42a7130933d168b8d84a21c98a32cb9fcf9222e2541ed0d9c7b/av-12.3.0.tar.gz", hash = "sha256:04b1892562aff3277efc79f32bd8f1d0cbb64ed011241cb3e96f9ad471816c22", size = 3833953 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/f5/91b296f15577593cae0c6d4465dd3fdb09836c99195230fc70d192a06231/av-12.3.0-cp38-cp38-macosx_10_13_x86_64.whl", hash = "sha256:d04d908febe4673311cae47b3f43d1c4858177fb5028fd3bb1b9fb46291e9748", size = 24701103 },
+    { url = "https://files.pythonhosted.org/packages/bc/4b/fdcd86866d7f528bd01d27c9fba0c9880b9fbac488617071ed8b8b8c74f9/av-12.3.0-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:8f380ee818f28435daa5ffc10d7f6e3854f3019bafb210dea5977a7292ae2467", size = 19965770 },
+    { url = "https://files.pythonhosted.org/packages/d0/9a/8c9f718ab00c42fc7de27c70e8954535f6ce1166a38a6654d366b092acea/av-12.3.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ebbfe391ee4d4d4dd1f8ec3969ced65362a811d3edb210933ce46c946f6e9263", size = 31817544 },
+    { url = "https://files.pythonhosted.org/packages/4b/8c/76ab77fb557bc24885a34d1ddb6cab361f18999e03cfb587bedb14328c25/av-12.3.0-cp38-cp38-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:20df6c5b71964adb05b353439f1e00b06e32526b2feaf1c5ff07a7a7f2feca38", size = 31327154 },
+    { url = "https://files.pythonhosted.org/packages/b1/32/186d20f016c549e095c5cb2fb2ac5dbc7c89d4dc699b84b592f65cc1004b/av-12.3.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f1a6512a12ace56d17ffb8a4909db724e2b6cc968ab8370ae75e7743387e86d1", size = 33688420 },
+    { url = "https://files.pythonhosted.org/packages/11/2d/eca0b61697352aaf14a68e9eb80dcc0eaca43744c24ccc5196b88c83bb5f/av-12.3.0-cp38-cp38-win_amd64.whl", hash = "sha256:7faadac791efee412f17309a3471d3a64f84a1761c3dfb360b8eda26dfc60f70", size = 26007818 },
+    { url = "https://files.pythonhosted.org/packages/21/04/a6ee133c4dda94e34cd7b4c9552dd4c09cf432d3652fe29d3262b4247e48/av-12.3.0-pp38-pypy38_pp73-macosx_10_13_x86_64.whl", hash = "sha256:9b93e1e4d8f5f46f3d21970a2d06b06fef8e36e3fd3fd78c2fed7c8f6b46a89c", size = 24229567 },
+    { url = "https://files.pythonhosted.org/packages/d4/40/c7eab97602d90d329a15649fb31d8df10f6ddd80bdf0257831c3e2a7e262/av-12.3.0-pp38-pypy38_pp73-macosx_11_0_arm64.whl", hash = "sha256:bc38c84afd5d38a5d6429dd687f69b09b563bca52c44d8cc44acea1dd6035184", size = 19543467 },
+    { url = "https://files.pythonhosted.org/packages/da/87/35908fbc203a12f0c90c02a5f3270220917d2c499d619708c821da11a814/av-12.3.0-pp38-pypy38_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:bf0cc3c665365a7c5bc4bfa83ad6096660648060cbf411466e69692eba6dde9d", size = 23329844 },
+    { url = "https://files.pythonhosted.org/packages/68/b1/9a483aaac2f86fa2c60b97ff0c0ce02bc5a34f41ef2e1becfbb4de9aa8c9/av-12.3.0-pp38-pypy38_pp73-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:126426897852e974781755209747ed7f9888ad3ef17fe274e0fe98fd5659568d", size = 23250432 },
+    { url = "https://files.pythonhosted.org/packages/04/9e/9975185e1a87ee89a3f82694a94994c4e02f4bd4c7c7e4748aa9decbcd7c/av-12.3.0-pp38-pypy38_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e3bdcd36bccf2d62655a4429c84855f0c99da42529c1ac8da391d8efe83d0afe", size = 25170528 },
+    { url = "https://files.pythonhosted.org/packages/67/9c/261ff4e0715285f20aa3b96f5ab07b722573ff2115525ee7c6799ab8fa8d/av-12.3.0-pp38-pypy38_pp73-win_amd64.whl", hash = "sha256:db313fce97b1c3bb50eb1f9483c705c0e51733b105a81c61c9d0946552185f2b", size = 25744942 },
 ]
 
 [[package]]
@@ -856,6 +877,7 @@ dependencies = [
     { name = "hmr2" },
     { name = "isaacgym" },
     { name = "joblib" },
+    { name = "phalp" },
     { name = "polars" },
     { name = "puffer-phc" },
     { name = "pufferlib" },
@@ -872,6 +894,7 @@ requires-dist = [
     { name = "hmr2", editable = "packages/hmr2" },
     { name = "isaacgym", editable = "packages/isaacgym" },
     { name = "joblib", specifier = ">=1.4.2,<2" },
+    { name = "phalp", editable = "packages/phalp" },
     { name = "polars", specifier = ">=1.5.0,<2" },
     { name = "puffer-phc", editable = "packages/puffer-phc" },
     { name = "pufferlib", git = "https://github.com/kywch/PufferLib.git" },
@@ -1398,6 +1421,11 @@ wheels = [
 ]
 
 [[package]]
+name = "neural-renderer-pytorch"
+version = "1.1.3"
+source = { git = "https://github.com/shubham-goel/NMR.git#e990b3c70f48d39231f607c79d76ce3db4bf7483" }
+
+[[package]]
 name = "ninja"
 version = "1.11.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1697,6 +1725,61 @@ wheels = [
 ]
 
 [[package]]
+name = "phalp"
+version = "0.1.3"
+source = { editable = "packages/phalp" }
+dependencies = [
+    { name = "av" },
+    { name = "chumpy" },
+    { name = "detectron2" },
+    { name = "dill" },
+    { name = "einops" },
+    { name = "hydra-core" },
+    { name = "joblib" },
+    { name = "neural-renderer-pytorch" },
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pandas" },
+    { name = "pyopengl" },
+    { name = "pyrender" },
+    { name = "pytube" },
+    { name = "rich" },
+    { name = "scenedetect", extra = ["opencv"] },
+    { name = "scikit-image" },
+    { name = "scikit-learn" },
+    { name = "smplx" },
+    { name = "timm" },
+    { name = "webdataset" },
+    { name = "yacs" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "av" },
+    { name = "chumpy", git = "https://github.com/howird/chumpy" },
+    { name = "detectron2", git = "https://github.com/facebookresearch/detectron2" },
+    { name = "dill" },
+    { name = "einops" },
+    { name = "hydra-core" },
+    { name = "joblib" },
+    { name = "neural-renderer-pytorch", git = "https://github.com/shubham-goel/NMR.git" },
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pandas" },
+    { name = "pyopengl", git = "https://github.com/mmatl/pyopengl.git" },
+    { name = "pyrender" },
+    { name = "pytube", git = "https://github.com/pytube/pytube.git" },
+    { name = "rich" },
+    { name = "scenedetect", extras = ["opencv"] },
+    { name = "scikit-image" },
+    { name = "scikit-learn" },
+    { name = "smplx" },
+    { name = "timm" },
+    { name = "webdataset" },
+    { name = "yacs" },
+]
+
+[[package]]
 name = "pickleshare"
 version = "0.7.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1970,8 +2053,7 @@ wheels = [
 [[package]]
 name = "pyopengl"
 version = "3.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9c/1d/4544708aaa89f26c97cc09450bb333a23724a320923e74d73e028b3560f9/PyOpenGL-3.1.0.tar.gz", hash = "sha256:9b47c5c3a094fa518ca88aeed35ae75834d53e4285512c61879f67a48c94ddaf", size = 1172688 }
+source = { git = "https://github.com/mmatl/pyopengl.git#76d1261adee2d3fd99b418e75b0416bb7d2865e6" }
 
 [[package]]
 name = "pyparsing"
@@ -2155,6 +2237,11 @@ wheels = [
 ]
 
 [[package]]
+name = "pytube"
+version = "15.0.0"
+source = { git = "https://github.com/pytube/pytube.git#a32fff39058a6f7e5e59ecd06a7467b71197ce35" }
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2321,6 +2408,26 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/40/ad/2b113098e69c985a3d8fbda4b902778eae4a35b7d5188859b4a63d30c161/safetensors-0.5.3-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:37f1521be045e56fc2b54c606d4455573e717b2d887c579ee1dbba5f868ece04", size = 643147 },
     { url = "https://files.pythonhosted.org/packages/0a/0c/95aeb51d4246bd9a3242d3d8349c1112b4ee7611a4b40f0c5c93b05f001d/safetensors-0.5.3-cp38-abi3-win32.whl", hash = "sha256:cfc0ec0846dcf6763b0ed3d1846ff36008c6e7290683b61616c4b040f6a54ace", size = 296677 },
     { url = "https://files.pythonhosted.org/packages/69/e2/b011c38e5394c4c18fb5500778a55ec43ad6106126e74723ffaee246f56e/safetensors-0.5.3-cp38-abi3-win_amd64.whl", hash = "sha256:836cbbc320b47e80acd40e44c8682db0e8ad7123209f69b093def21ec7cafd11", size = 308878 },
+]
+
+[[package]]
+name = "scenedetect"
+version = "0.6.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "numpy" },
+    { name = "platformdirs" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/36/1e29ac958e2d2b5e4365fb7de03f94a98b9949c46267e682bcfe22460812/scenedetect-0.6.6.tar.gz", hash = "sha256:4b50946abca886bd623e7a304e30da197f0e7e69cd65d80115d551538261c35b", size = 165791 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/5b/c090fe55521265eb1816c303267e985125000a4e32237e95562ed462608f/scenedetect-0.6.6-py3-none-any.whl", hash = "sha256:cbd47e4aff1d3ba6f4ee00e54ff9af26378aa2b48f501003dddf5f96e37d3eb0", size = 131581 },
+]
+
+[package.optional-dependencies]
+opencv = [
+    { name = "opencv-python" },
 ]
 
 [[package]]
