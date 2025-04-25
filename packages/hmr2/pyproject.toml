@@ -1,0 +1,35 @@
+[project]
+name = "hmr2"
+version = "0.1.0"
+description = "End to end Human Mesh Reconstruction with Transformers"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "gdown",
+  "numpy",
+  "torch",
+  "torchvision",
+  "pytorch-lightning",
+  "smplx",
+  "pyrender",
+  "opencv-python",
+  "yacs",
+  "scikit-image",
+  "einops",
+  "timm",
+  "webdataset",
+  "dill",
+  "pandas",
+  "detectron2 @ git+https://github.com/facebookresearch/detectron2",
+  "chumpy @ git+https://github.com/nico-von-huene/chumpy",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hmr2"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

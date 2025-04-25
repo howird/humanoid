@@ -10,6 +10,7 @@ dependencies = [
     "puffer-phc",
     "isaacgym",
     "gymtorch",
+    "hmr2",
 
     "wandb>=0.16.6,<0.17",
     "tyro>=0.8.14,<0.9",
@@ -26,11 +27,12 @@ dependencies = [
 puffer-phc = { workspace = true }
 isaacgym = { workspace = true }
 gymtorch = { workspace = true }
+hmr2 = { workspace = true }
+chumpy = { git = "https://github.com/howird/chumpy" }
 
 [tool.uv.workspace]
 members = ["packages/*"]
-# exclude = ["packages/gymtorch"]
-#
+
 # [build-system]
 # requires = ["hatchling"]
 # build-backend = "hatchling.build"
