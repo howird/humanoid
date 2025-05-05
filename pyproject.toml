@@ -10,8 +10,8 @@ dependencies = [
     "puffer-phc",
     "isaacgym",
     "gymtorch",
-    "hmr2",
-    "phalp",
+    "hmr2", # mesh reconstruction
+    "phalp", # tracking
 
     "wandb>=0.16.6,<0.17",
     "tyro>=0.8.14,<0.9",
@@ -19,9 +19,9 @@ dependencies = [
     "joblib>=1.4.2,<2",
     "debugpy>=1.8.5,<2",
 
-    "pufferlib@git+https://github.com/kywch/PufferLib.git",
-    "smpl_sim@git+https://github.com/kywch/SMPLSim.git",
-    "carbs@git+https://github.com/PufferAI/carbs.git",    
+    "pufferlib @ git+https://github.com/kywch/PufferLib.git",
+    "smpl_sim @ git+https://github.com/kywch/SMPLSim.git",
+    "carbs @ git+https://github.com/PufferAI/carbs.git",    
 ]
 
 [tool.uv.sources]

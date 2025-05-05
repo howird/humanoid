@@ -4,7 +4,8 @@ import argparse
 import os
 import cv2
 import numpy as np
-import debugpy
+
+from puffer_phc.config import DebugConfig
 
 from hmr2.configs import CACHE_DIR_4DHUMANS
 from hmr2.models import HMR2, download_models, load_hmr2, DEFAULT_CHECKPOINT
@@ -17,6 +18,8 @@ LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
 def main():
     import time
+
+    DebugConfig(enable=True)()
 
     start = time.time()
     parser = argparse.ArgumentParser(description="HMR2 demo code")

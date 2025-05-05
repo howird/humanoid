@@ -1,6 +1,5 @@
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Tuple
 
 import os
@@ -9,6 +8,8 @@ import torch
 import numpy as np
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig
+
+from puffer_phc.config import DebugConfig
 
 from phalp.configs.base import FullConfig
 from phalp.models.hmar.hmr import HMR2018Predictor
@@ -23,9 +24,37 @@ warnings.filterwarnings("ignore")
 log = get_pylogger(__name__)
 
 
-class HMR2Predictor(HMR2018Predictor):
+# class HMR2Predictor(HMR2018Predictor):
+#     def __init__(self, cfg) -> None:
+#         super().__init__(cfg)
+#         # Setup our new model
+#         from hmr2.models import download_models, load_hmr2
+#
+#         # Download and load checkpoints
+#         download_models()
+#         model, _ = load_hmr2()
+#
+#         self.model = model
+#         self.model.eval()
+#
+#     def forward(self, x):
+#         hmar_out = self.hmar_old(x)
+#         batch = {
+#             "img": x[:, :3, :, :],
+#             "mask": (x[:, 3, :, :]).clip(0, 1),
+#         }
+#         model_out = self.model(batch)
+#         out = hmar_out | {
+#             "pose_smpl": model_out["pred_smpl_params"],
+#             "pred_cam": model_out["pred_cam"],
+#         }
+#         return out
+
+
+class HMR2023TextureSampler(HMR2018Predictor):
     def __init__(self, cfg) -> None:
         super().__init__(cfg)
+
         # Setup our new model
         from hmr2.models import download_models, load_hmr2
 
@@ -35,24 +64,6 @@ class HMR2Predictor(HMR2018Predictor):
 
         self.model = model
         self.model.eval()
-
-    def forward(self, x):
-        hmar_out = self.hmar_old(x)
-        batch = {
-            "img": x[:, :3, :, :],
-            "mask": (x[:, 3, :, :]).clip(0, 1),
-        }
-        model_out = self.model(batch)
-        out = hmar_out | {
-            "pose_smpl": model_out["pred_smpl_params"],
-            "pred_cam": model_out["pred_cam"],
-        }
-        return out
-
-
-class HMR2023TextureSampler(HMR2Predictor):
-    def __init__(self, cfg) -> None:
-        super().__init__(cfg)
 
         # Model's all set up. Now, load tex_bmap and tex_fmap
         # Texture map atlas
@@ -151,6 +162,8 @@ class HMR2023TextureSampler(HMR2Predictor):
             "uv_vector": self.hmar_old.process_uv_image(uv_image),
             "pose_smpl": model_out["pred_smpl_params"],
             "pred_cam": model_out["pred_cam"],
+            "_pred_cam_t": model_out["pred_cam_t"],
+            "_focal_length": model_out["focal_length"],
         }
         return out
 
@@ -201,6 +214,7 @@ cs.store(name="config", node=Human4DConfig)
 @hydra.main(version_base="1.2", config_name="config")
 def main(cfg: DictConfig) -> Optional[float]:
     """Main function for running the PHALP tracker."""
+    DebugConfig(enable=True)()
 
     phalp_tracker = HMR2_4dhuman(cfg)
 

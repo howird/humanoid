@@ -3,6 +3,8 @@ import traceback
 import warnings
 from pathlib import Path
 
+from phalp.models import hmar
+
 warnings.filterwarnings("ignore")
 
 import cv2
@@ -22,7 +24,6 @@ from phalp.configs.base import CACHE_DIR
 from phalp.external.deep_sort_ import nn_matching
 from phalp.external.deep_sort_.detection import Detection
 from phalp.external.deep_sort_.tracker import Tracker
-from phalp.models.hmar import HMAR
 from phalp.models.predictor import Pose_transformer_v2
 from phalp.utils import get_pylogger
 from phalp.utils.io import IO_Manager
@@ -69,6 +70,8 @@ class PHALP(nn.Module):
         self.default_setup()
 
     def setup_hmr(self):
+        from phalp.models.hmar import HMAR
+
         log.info("Loading HMAR model...")
         self.HMAR = HMAR(self.cfg)
         self.HMAR.load_weights(self.cfg.hmr.hmar_path)
@@ -514,6 +517,7 @@ class PHALP(nn.Module):
         with torch.no_grad():
             extra_args = {}
             hmar_out = self.HMAR(masked_image_list.cuda(), **extra_args)
+            # "_pred_cam_t" "_focal_length"
             uv_vector = hmar_out["uv_vector"]
             appe_embedding = self.HMAR.autoencoder_hmar(uv_vector, en=True)
             appe_embedding = appe_embedding.view(appe_embedding.shape[0], -1)
@@ -540,6 +544,7 @@ class PHALP(nn.Module):
             pred_cam_ = pred_cam.view(BS, -1)
             pred_joints_2d_.contiguous()
             pred_cam_.contiguous()
+
             loca_embedding = torch.cat((pred_joints_2d_, pred_cam_, pred_cam_, pred_cam_), 1)
 
         # keeping it here for legacy reasons (T3DP), but it is not used.
@@ -571,6 +576,11 @@ class PHALP(nn.Module):
                 "ground_truth": gt[p_],
                 "annotations": ann[p_],
                 "extra_data": extra_data[p_] if extra_data is not None else None,
+                "hmar_out": {
+                    "cam": hmar_out["pred_cam"].view(BS, -1).cpu().numpy(),
+                    "cam_t": hmar_out["_pred_cam_t"].view(BS, -1).cpu().numpy(),
+                    "focal_length": hmar_out["_focal_length"].view(BS, -1).cpu().numpy(),
+                },
             }
             detection_data_list.append(Detection(detection_data))
 

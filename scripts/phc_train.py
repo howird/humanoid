@@ -28,21 +28,7 @@ from puffer_phc.clean_pufferl.env import PHCPufferEnv, make as env_creator
 from puffer_phc.envs.humanoid_phc import HumanoidPHC
 import puffer_phc.policies as policy_module
 
-from puffer_phc.config import EnvConfig, PolicyConfig, RNNConfig, TrainConfig
-
-
-@dataclass
-class DebugConfig:
-    enable: bool = False
-    port: int = 5678
-
-    def __call__(self):
-        if self.enable:
-            import debugpy
-
-            debugpy.listen(self.port)
-            print(f"Waiting for debugger attach to port: {self.port}")
-            debugpy.wait_for_client()
+from puffer_phc.config import EnvConfig, PolicyConfig, RNNConfig, TrainConfig, DebugConfig
 
 
 @dataclass

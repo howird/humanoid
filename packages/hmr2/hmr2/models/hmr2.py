@@ -148,6 +148,9 @@ class HMR2(pl.LightningModule):
         )
 
         output["pred_keypoints_2d"] = pred_keypoints_2d.reshape(batch_size, -1, 2)
+        output["global_orient"] = pred_smpl_params["global_orient"]
+        output["body_pose"] = pred_smpl_params["body_pose"]
+        output["betas"] = pred_smpl_params["betas"]
         return output
 
     def compute_loss(self, batch: Dict, output: Dict, train: bool = True) -> torch.Tensor:
