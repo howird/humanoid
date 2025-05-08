@@ -1,4 +1,3 @@
-import os
 import traceback
 import warnings
 from pathlib import Path
@@ -20,13 +19,13 @@ from pycocotools import mask as mask_utils
 from scenedetect import AdaptiveDetector, detect
 from sklearn.linear_model import Ridge
 
-from phalp.configs.base import CACHE_DIR
+from phalp.configs.base import CACHE_DIR, BaseConfig
 from phalp.external.deep_sort_ import nn_matching
 from phalp.external.deep_sort_.detection import Detection
 from phalp.external.deep_sort_.tracker import Tracker
 from phalp.models.predictor import Pose_transformer_v2
 from phalp.utils import get_pylogger
-from phalp.utils.io import IO_Manager
+from phalp.utils.io_manager import IOManager
 from phalp.utils.utils import convert_pkl, get_prediction_interval, progress_bar, smpl_to_pose_camera_vector
 from phalp.utils.utils_dataset import process_image, process_mask
 from phalp.utils.utils_detectron2 import DefaultPredictor_Lazy, DefaultPredictor_with_RPN
@@ -38,12 +37,12 @@ log = get_pylogger(__name__)
 
 
 class PHALP(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg: BaseConfig):
         super(PHALP, self).__init__()
 
         self.cfg = cfg
         self.device = torch.device(self.cfg.device)
-        self.io_manager = IO_Manager(self.cfg)
+        self.io_manager = IOManager(self.cfg.video, self.cfg.render.fps)
 
         # download wights and configs from Google Drive
         self.cached_download_from_drive()
@@ -65,9 +64,6 @@ class PHALP(nn.Module):
 
         # train or eval
         self.train() if (self.cfg.train) else self.eval()
-
-        # create nessary directories
-        self.default_setup()
 
     def setup_hmr(self):
         from phalp.models.hmar import HMAR
@@ -143,15 +139,12 @@ class PHALP(nn.Module):
         # by default this will not be initialized
         self.postprocessor = Postprocessor(self.cfg, self)
 
-    def default_setup(self):
-        # create subfolders for saving additional results
-        try:
-            os.makedirs(self.cfg.video.output_dir + "/results", exist_ok=True)
-            os.makedirs(self.cfg.video.output_dir + "/results_tracks", exist_ok=True)
-            os.makedirs(self.cfg.video.output_dir + "/_TMP", exist_ok=True)
-            os.makedirs(self.cfg.video.output_dir + "/_DEMO", exist_ok=True)
-        except:
-            pass
+    def default_setup(self, video_name):
+        tracking_output_path = self.cfg.video.output_dir / video_name
+        tracking_output_path.mkdir(parents=True, exist_ok=True)
+        # (tracking_output_path / "results_tracks").mkdir(parents=True, exist_ok=True)
+        # (tracking_output_path / "_TMP").mkdir(parents=True, exist_ok=True)
+        # (tracking_output_path / "_DEMO").mkdir(parents=True, exist_ok=True)
 
     def track(self):
         eval_keys = ["tracked_ids", "tracked_bbox", "tid", "bbox", "tracked_time"]
@@ -165,16 +158,13 @@ class PHALP(nn.Module):
 
         # process the source video and return a list of frames
         # source can be a video file, a youtube link or a image folder
-        io_data = self.io_manager.get_frames_from_source()
-        list_of_frames, additional_data = io_data["list_of_frames"], io_data["additional_data"]
-        self.cfg.video_seq = io_data["video_name"]
-        pkl_path = (
-            self.cfg.video.output_dir + "/results/" + self.cfg.track_dataset + "_" + str(self.cfg.video_seq) + ".pkl"
-        )
-        video_path = self.cfg.video.output_dir + "/" + self.cfg.base_tracker + "_" + str(self.cfg.video_seq) + ".mp4"
+        video_name, list_of_frames, additional_data = self.io_manager.get_frames_from_source()
+
+        pkl_path = self.cfg.video.output_dir / f"{self.cfg.track_dataset}_{video_name}.pkl"
+        video_path = self.cfg.video.output_dir / f"{self.cfg.base_tracker}_{video_name}.mp4"
 
         # check if the video is already processed
-        if not (self.cfg.overwrite) and os.path.isfile(pkl_path):
+        if not (self.cfg.overwrite) and pkl_path.is_file():
             return 0
 
         # eval mode
@@ -182,9 +172,9 @@ class PHALP(nn.Module):
 
         # setup rendering, deep sort and directory structure
         self.setup_deepsort()
-        self.default_setup()
+        self.default_setup(video_name)
 
-        log.info("Saving tracks at : " + self.cfg.video.output_dir + "/results/" + str(self.cfg.video_seq))
+        log.info(f"Saving tracks at : {self.cfg.video.output_dir}")
 
         try:
             list_of_frames = (
@@ -192,14 +182,14 @@ class PHALP(nn.Module):
                 if self.cfg.phalp.start_frame == -1
                 else list_of_frames[self.cfg.phalp.start_frame : self.cfg.phalp.end_frame]
             )
-            list_of_shots = self.get_list_of_shots(list_of_frames)
+            list_of_shots = self.get_list_of_shots(video_name, list_of_frames)
 
             tracked_frames = []
             final_visuals_dic = {}
 
             for t_, frame_name in progress_bar(
                 enumerate(list_of_frames),
-                description="Tracking : " + self.cfg.video_seq,
+                description=f"Tracking : {video_name}",
                 total=len(list_of_frames),
                 disable=False,
             ):
@@ -328,15 +318,11 @@ class PHALP(nn.Module):
 
             joblib.dump(final_visuals_dic, pkl_path, compress=3)
             self.io_manager.close_video()
+
             if self.cfg.use_gt:
                 joblib.dump(
                     self.tracker.tracked_cost,
-                    self.cfg.video.output_dir
-                    + "/results/"
-                    + str(self.cfg.video_seq)
-                    + "_"
-                    + str(self.cfg.phalp.start_frame)
-                    + "_distance.pkl",
+                    self.cfg.video.output_dir / f"{video_name}_{self.cfg.phalp.start_frame}_distance.pkl",
                 )
 
             return final_visuals_dic, pkl_path
@@ -410,8 +396,8 @@ class PHALP(nn.Module):
             pred_scores = instances.scores.cpu().numpy()
             pred_classes = instances.pred_classes.cpu().numpy()
 
-            ground_truth_track_id = [1 for i in list(range(len(pred_scores)))]
-            ground_truth_annotations = [[] for i in list(range(len(pred_scores)))]
+            ground_truth_track_id = [1 for _ in range(len(pred_scores))]
+            ground_truth_annotations = [[] for _ in range(len(pred_scores))]
 
         return (
             pred_bbox,
@@ -487,6 +473,7 @@ class PHALP(nn.Module):
         NPEOPLE = len(score)
 
         if NPEOPLE == 0:
+            log.warning(f"No people found in {frame_name}.")
             return []
 
         img_height, img_width, new_image_size, left, top = measurments
@@ -499,7 +486,7 @@ class PHALP(nn.Module):
         for p_ in range(NPEOPLE):
             if bbox[p_][2] - bbox[p_][0] < self.cfg.phalp.small_w or bbox[p_][3] - bbox[p_][1] < self.cfg.phalp.small_h:
                 continue
-            masked_image, center_, scale_, rles, center_pad, scale_pad = self.get_croped_image(
+            masked_image, _center, _scale, rles, center_pad, scale_pad = self.get_croped_image(
                 image, bbox[p_], bbox_pad[p_], seg_mask[p_]
             )
             masked_image_list.append(masked_image)
@@ -509,6 +496,7 @@ class PHALP(nn.Module):
             selected_ids.append(p_)
 
         if len(masked_image_list) == 0:
+            log.warning("No eligible bounding boxes found, phalp..{small_w, small_h} may be set too high.")
             return []
 
         masked_image_list = torch.stack(masked_image_list, dim=0)
@@ -517,7 +505,6 @@ class PHALP(nn.Module):
         with torch.no_grad():
             extra_args = {}
             hmar_out = self.HMAR(masked_image_list.cuda(), **extra_args)
-            # "_pred_cam_t" "_focal_length"
             uv_vector = hmar_out["uv_vector"]
             appe_embedding = self.HMAR.autoencoder_hmar(uv_vector, en=True)
             appe_embedding = appe_embedding.view(appe_embedding.shape[0], -1)
@@ -576,11 +563,9 @@ class PHALP(nn.Module):
                 "ground_truth": gt[p_],
                 "annotations": ann[p_],
                 "extra_data": extra_data[p_] if extra_data is not None else None,
-                "hmar_out": {
-                    "cam": hmar_out["pred_cam"].view(BS, -1).cpu().numpy(),
-                    "cam_t": hmar_out["_pred_cam_t"].view(BS, -1).cpu().numpy(),
-                    "focal_length": hmar_out["_focal_length"].view(BS, -1).cpu().numpy(),
-                },
+                "hmar_out_cam": hmar_out["pred_cam"].view(BS, -1).cpu().numpy(),
+                "hmar_out_cam_t": hmar_out["_pred_cam_t"].view(BS, -1).cpu().numpy(),
+                "hmar_out_focal_length": hmar_out["_focal_length"].view(BS, -1).cpu().numpy(),
             }
             detection_data_list.append(Detection(detection_data))
 
@@ -715,19 +700,22 @@ class PHALP(nn.Module):
 
         return r2
 
-    def get_list_of_shots(self, list_of_frames):
+    def get_list_of_shots(self, video_name, list_of_frames):
         # https://github.com/Breakthrough/PySceneDetect
         list_of_shots = []
         remove_tmp_video = False
         if self.cfg.detect_shots:
             if isinstance(list_of_frames[0], str):
                 # make a video if list_of_frames is frames
-                video_tmp_name = self.cfg.video.output_dir + "/_TMP/" + str(self.cfg.video_seq) + ".mp4"
+                video_tmp_name = self.cfg.video.output_dir / "_TMP" / f"{video_name}.mp4"
                 for ft_, fname_ in enumerate(list_of_frames):
                     im_ = cv2.imread(fname_)
                     if ft_ == 0:
                         video_file = cv2.VideoWriter(
-                            video_tmp_name, cv2.VideoWriter_fourcc(*"mp4v"), 24, frameSize=(im_.shape[1], im_.shape[0])
+                            str(video_tmp_name),
+                            cv2.VideoWriter_fourcc(*"mp4v"),
+                            24,
+                            frameSize=(im_.shape[1], im_.shape[0]),
                         )
                     video_file.write(im_)
                 video_file.release()
@@ -738,22 +726,17 @@ class PHALP(nn.Module):
                 raise Exception("Unknown type of list_of_frames")
 
             # Detect scenes in a video using PySceneDetect.
-            scene_list = detect(video_tmp_name, AdaptiveDetector())
+            scene_list = detect(str(video_tmp_name), AdaptiveDetector())
 
             if remove_tmp_video:
-                os.system("rm " + video_tmp_name)
+                video_tmp_name.unlink()  # Use pathlib to remove file
 
             for scene in scene_list:
                 list_of_shots.append(scene[0].get_frames())
                 list_of_shots.append(scene[1].get_frames())
             list_of_shots = np.unique(list_of_shots)
             list_of_shots = list_of_shots[1:-1]
-            log.info(
-                "Detected shot change at frame"
-                + "s" * min(0, len(list_of_shots) - 1)
-                + ": "
-                + ", ".join(map(str, list_of_shots))
-            )
+            log.info(f"Detected shot change at frames: {list_of_shots}.")
 
         return list_of_shots
 
@@ -762,74 +745,70 @@ class PHALP(nn.Module):
         :param url: the URL of the file to download
         :param path: the path to save the file to
         """
-
-        os.makedirs(os.path.join(CACHE_DIR, "phalp"), exist_ok=True)
-        os.makedirs(os.path.join(CACHE_DIR, "phalp/3D"), exist_ok=True)
-        os.makedirs(os.path.join(CACHE_DIR, "phalp/weights"), exist_ok=True)
-        os.makedirs(os.path.join(CACHE_DIR, "phalp/ava"), exist_ok=True)
-
-        smpl_path = "data/smpl/SMPL_NEUTRAL.pkl"  # HACK(howird)
-
-        if not os.path.exists(smpl_path):
-            raise ValueError("SMPL path not found")
+        # Create necessary directories
+        (CACHE_DIR / "phalp").mkdir(parents=True, exist_ok=True)
+        (CACHE_DIR / "phalp/3D").mkdir(parents=True, exist_ok=True)
+        (CACHE_DIR / "phalp/weights").mkdir(parents=True, exist_ok=True)
+        (CACHE_DIR / "phalp/ava").mkdir(parents=True, exist_ok=True)
 
         additional_urls = additional_urls if additional_urls is not None else {}
         download_files = {
             "head_faces.npy": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/head_faces.npy",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "mean_std.npy": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/mean_std.npy",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "smpl_mean_params.npz": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/smpl_mean_params.npz",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "SMPL_to_J19.pkl": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/SMPL_to_J19.pkl",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "texture.npz": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/texture.npz",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "bmap_256.npy": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/bmap_256.npy",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "fmap_256.npy": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/fmap_256.npy",
-                os.path.join(CACHE_DIR, "phalp/3D"),
+                str(CACHE_DIR / "phalp/3D"),
             ],
             "hmar_v2_weights.pth": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/hmar_v2_weights.pth",
-                os.path.join(CACHE_DIR, "phalp/weights"),
+                str(CACHE_DIR / "phalp/weights"),
             ],
             "pose_predictor.pth": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/pose_predictor_40006.ckpt",
-                os.path.join(CACHE_DIR, "phalp/weights"),
+                str(CACHE_DIR / "phalp/weights"),
             ],
             "pose_predictor.yaml": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/config_40006.yaml",
-                os.path.join(CACHE_DIR, "phalp/weights"),
+                str(CACHE_DIR / "phalp/weights"),
             ],
             # data for ava dataset
             "ava_labels.pkl": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/ava/ava_labels.pkl",
-                os.path.join(CACHE_DIR, "phalp/ava"),
+                str(CACHE_DIR / "phalp/ava"),
             ],
             "ava_class_mapping.pkl": [
                 "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/ava/ava_class_mappping.pkl",
-                os.path.join(CACHE_DIR, "phalp/ava"),
+                str(CACHE_DIR / "phalp/ava"),
             ],
         }
         download_files.update(additional_urls)
 
         for file_name, url in download_files.items():
-            if not os.path.exists(os.path.join(url[1], file_name)):
-                print("Downloading file: " + file_name)
-                # output = gdown.cached_download(url[0], os.path.join(url[1], file_name), fuzzy=True)
-                output = cache_url(url[0], os.path.join(url[1], file_name))
-                assert os.path.exists(os.path.join(url[1], file_name)), f"{output} does not exist"
+            file_path = Path(url[1]) / file_name
+            if not file_path.exists():
+                print(f"Downloading file: {file_name}")
+                # output = gdown.cached_download(url[0], str(file_path), fuzzy=True)
+                output = cache_url(url[0], str(file_path))
+                assert Path(output).exists(), f"{output} does not exist"

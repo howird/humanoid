@@ -1,17 +1,19 @@
+#!/usr/bin/env python3
+"""
+HMR Tracking Script - Tracks humans in video and extracts 3D mesh information.
+"""
+
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
-import os
-import hydra
 import torch
 import numpy as np
-from hydra.core.config_store import ConfigStore
-from omegaconf import DictConfig
+import tyro
 
 from puffer_phc.config import DebugConfig
 
-from phalp.configs.base import FullConfig
+from phalp.configs.base import BaseConfig
 from phalp.models.hmar.hmr import HMR2018Predictor
 from phalp.trackers.PHALP import PHALP
 from phalp.utils import get_pylogger
@@ -24,34 +26,9 @@ warnings.filterwarnings("ignore")
 log = get_pylogger(__name__)
 
 
-# class HMR2Predictor(HMR2018Predictor):
-#     def __init__(self, cfg) -> None:
-#         super().__init__(cfg)
-#         # Setup our new model
-#         from hmr2.models import download_models, load_hmr2
-#
-#         # Download and load checkpoints
-#         download_models()
-#         model, _ = load_hmr2()
-#
-#         self.model = model
-#         self.model.eval()
-#
-#     def forward(self, x):
-#         hmar_out = self.hmar_old(x)
-#         batch = {
-#             "img": x[:, :3, :, :],
-#             "mask": (x[:, 3, :, :]).clip(0, 1),
-#         }
-#         model_out = self.model(batch)
-#         out = hmar_out | {
-#             "pose_smpl": model_out["pred_smpl_params"],
-#             "pred_cam": model_out["pred_cam"],
-#         }
-#         return out
-
-
 class HMR2023TextureSampler(HMR2018Predictor):
+    """HMR2023 model with texture sampling capabilities."""
+
     def __init__(self, cfg) -> None:
         super().__init__(cfg)
 
@@ -67,8 +44,10 @@ class HMR2023TextureSampler(HMR2018Predictor):
 
         # Model's all set up. Now, load tex_bmap and tex_fmap
         # Texture map atlas
-        bmap = np.load(os.path.join(CACHE_DIR, "phalp/3D/bmap_256.npy"))
-        fmap = np.load(os.path.join(CACHE_DIR, "phalp/3D/fmap_256.npy"))
+        bmap_path = CACHE_DIR / "phalp/3D/bmap_256.npy"
+        fmap_path = CACHE_DIR / "phalp/3D/fmap_256.npy"
+        bmap = np.load(bmap_path)
+        fmap = np.load(fmap_path)
         self.register_buffer("tex_bmap", torch.tensor(bmap, dtype=torch.float))
         self.register_buffer("tex_fmap", torch.tensor(fmap, dtype=torch.long))
 
@@ -92,8 +71,6 @@ class HMR2023TextureSampler(HMR2018Predictor):
             "mask": (x[:, 3, :, :]).clip(0, 1),
         }
         model_out = self.model(batch)
-
-        # from hmr2.models.prohmr_texture import unproject_uvmap_to_mesh
 
         def unproject_uvmap_to_mesh(bmap, fmap, verts, faces):
             # bmap:  256,256,3
@@ -119,7 +96,7 @@ class HMR2023TextureSampler(HMR2018Predictor):
         map_verts, valid_mask = unproject_uvmap_to_mesh(self.tex_bmap, self.tex_fmap, pred_verts, face_tensor)  # B,N,3
 
         # Project map_verts to image using K,R,t
-        # map_verts_view = einsum('bij,bnj->bni', R, map_verts) + t # R=I t=0
+        # map_verts_view = einsum('bij,bnj->bni', R, map_verts) # R=I t=0
         focal = self.focal_length / (self.img_size / 2)
         map_verts_proj = focal * map_verts[:, :, :2] / map_verts[:, :, 2:3]  # B,N,2
         map_verts_depth = map_verts[:, :, 2]  # B,N
@@ -169,6 +146,8 @@ class HMR2023TextureSampler(HMR2018Predictor):
 
 
 class HMR2_4dhuman(PHALP):
+    """Extended PHALP tracker with HMR2023 texture sampling capabilities."""
+
     def __init__(self, cfg):
         super().__init__(cfg)
 
@@ -201,24 +180,21 @@ class HMR2_4dhuman(PHALP):
 
 
 @dataclass
-class Human4DConfig(FullConfig):
-    # override defaults if needed
-    expand_bbox_shape: Optional[Tuple[int]] = (192, 256)
-    pass
+class Human4DConfig(BaseConfig):
+    """Configuration for Human4D tracking."""
+
+    # Target aspect ratio for bounding boxes (width, height)
+    expand_bbox_shape: Optional[Tuple[int, int]] = (192, 256)
+    debug: DebugConfig = field(default_factory=DebugConfig)
 
 
-cs = ConfigStore.instance()
-cs.store(name="config", node=Human4DConfig)
-
-
-@hydra.main(version_base="1.2", config_name="config")
-def main(cfg: DictConfig) -> Optional[float]:
-    """Main function for running the PHALP tracker."""
-    DebugConfig(enable=True)()
+def main():
+    cfg = tyro.cli(Human4DConfig)
+    cfg.debug()
 
     phalp_tracker = HMR2_4dhuman(cfg)
 
-    phalp_tracker.track()
+    return phalp_tracker.track()
 
 
 if __name__ == "__main__":

@@ -20,44 +20,11 @@ details.
   <img src="sample_data/cmu_mocap_05_06.gif" />
 </div>
 
-## Getting Started
+## Usage
 
-1. Clone this repository.
+### Training
 
-```
-git clone https://github.com/kywch/puffer-phc.git
-```
-
-2. Install
-   [uv](https://docs.astral.sh/uv/getting-started/installation/#installation-methods)
-
-3. Download and unzip Isaac Gym from
-   [here](https://developer.nvidia.com/isaac-gym) to the root of this repo:
-   `puffer-phc/isaacgym`
-
-4. Create, activate, and sync your uv virtualenv
-
-```
-uv venv
-source .venv/bin/activate
-uv sync
-```
-
-5. Install gymtorch by running the following command inside the repository
-   directory:
-
-```
-cd gymtorch && python setup.py clean && python setup.py develop
-```
-
-6. Download the SMPL parameters from [SMPL](https://smpl.is.tue.mpg.de/), and
-   unzip them into `smpl` folder. Rename the files
-   `basicmodel_neutral_lbs_10_207_0_v1.1.0`,
-   `basicmodel_m_lbs_10_207_0_v1.1.0.pkl`,
-   `basicmodel_f_lbs_10_207_0_v1.1.0.pkl` to `SMPL_NEUTRAL.pkl`, `SMPL_MALE.pkl`
-   and `SMPL_FEMALE.pkl`.
-
-7. Train a policy. In the virtual environment, run:
+Train a policy. In the virtual environment, run:
 
 ```
 python scripts/train.py --env.motion_file <MOTION FILE PATH>
@@ -67,18 +34,24 @@ python scripts/train.py --env.motion_file <MOTION FILE PATH>
 
     To prepare your own motion data, please see the `convert_amass_data.py` script in the `scripts` folder. After conversion, you can visually inspect the data with the `vis_motion_mj.py` script.
 
-6. Play the trained policy. In the virtual environment, run:
-   ```
-   python scripts/train.py --mode play --checkpoint-path <CHECKPOINT PATH>
-   ```
+### Demo
 
-   For batch evaluation (e.g., using 4096 envs to evaluate AMASS 11313 motions),
-   run:
-   ```
-   python scripts/train.py --mode eval --checkpoint-path <CHECKPOINT PATH>
-   ```
+Play the trained policy. In the virtual environment, run:
 
-7. Sweep the hyperparameters using CARBS. This is not fully supported yet.
+```
+python scripts/train.py --mode play --checkpoint-path <CHECKPOINT PATH>
+```
+
+For batch evaluation (e.g., using 4096 envs to evaluate AMASS 11313 motions),
+run:
+
+```
+python scripts/train.py --mode eval --checkpoint-path <CHECKPOINT PATH>
+```
+
+### Sweep
+
+3. Sweep the hyperparameters using CARBS. This is not fully supported yet.
    ```
    python scripts/train.py --mode sweep
    ```

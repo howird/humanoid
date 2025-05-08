@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import numpy as np
 import torch
 import torch.nn as nn
@@ -35,7 +36,7 @@ class HMAR(nn.Module):
         self.texture_head = TextureHead(self.uv_sampler, self.cfg, img_H=img_H, img_W=img_W)
         self.encoding_head = EncodingHead(cfg=self.cfg, img_H=img_H, img_W=img_W)
 
-        smpl_cfg = {k.lower(): v for k, v in dict(cfg.SMPL).items()}
+        smpl_cfg = {k.lower(): v for k, v in asdict(cfg.SMPL).items()}
         self.smpl = SMPL(**smpl_cfg)
 
         self.smpl_head = SMPLHead(cfg, input_dim=cfg.MODEL.SMPL_HEAD.IN_CHANNELS, pool="pooled")
