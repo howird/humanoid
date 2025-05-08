@@ -7,9 +7,6 @@ CACHE_DIR = Path.home() / ".cache"
 
 @dataclass
 class VideoConfig:
-    # source path can be a video, or a directory of images, youtube link, or a pkl file with keys as frames
-    source: Union[Path, str]
-
     output_dir: Path = Path("outputs") / "tracking"
 
     extract_video: bool = True
@@ -26,19 +23,11 @@ class VideoConfig:
     end_time: str = "10s"
 
     def __post_init__(self):
-        if isinstance(self.source, str) and not (
-            self.source.startswith("https://") or self.source.startswith("http://")  # youtube video
-        ):
-            self.source = Path(self.source)
-
         if isinstance(self.output_dir, str):
             self.output_dir = Path(self.output_dir)
 
         if self.base_path and isinstance(self.base_path, str):
             self.base_path = Path(self.base_path)
-
-        if isinstance(self.source, Path) and not self.source.exists():
-            raise ValueError(f"Input video, {self.source}, does not exist.")
 
         if self.output_dir.is_file():
             raise ValueError(f"Output path, {self.output_dir}, must be a directory.")
@@ -62,8 +51,8 @@ class PHALPConfig:
     start_frame: int = -1
     end_frame: int = 10
 
-    small_w: int = 25
-    small_h: int = 50
+    small_w: int = 0
+    small_h: int = 0
 
 
 @dataclass

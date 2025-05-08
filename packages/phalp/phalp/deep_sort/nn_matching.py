@@ -6,6 +6,8 @@ import copy
 
 import numpy as np
 
+from phalp.utils.pose import get_pose_distance
+
 
 def _pdist_l2(a, b):
     """Compute pair-wise squared l2 distances between points in `a` and `b`."""
@@ -35,7 +37,7 @@ def _pdist(cfg, a, b, dims, phalp_tracker):
 
     track_pose = a_pose
     detect_pose = b_pose
-    pose_distance = phalp_tracker.get_pose_distance(track_pose, detect_pose)
+    pose_distance = get_pose_distance(track_pose, detect_pose)
 
     track_location = np.reshape(a_loca[:, :-9], (-1, 45, 2))
     detect_location = np.reshape(b_loca[:, :-9], (-1, 45, 2))

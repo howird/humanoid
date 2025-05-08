@@ -1,8 +1,6 @@
-import traceback
+from typing import List
 import warnings
 from pathlib import Path
-
-from phalp.models import hmar
 
 warnings.filterwarnings("ignore")
 
@@ -12,37 +10,34 @@ import numpy as np
 import torch
 import torch.nn as nn
 from detectron2 import model_zoo
-from detectron2.config import get_cfg
-from detectron2.structures import Boxes, Instances
-from hmr2.datasets.utils import expand_bbox_to_aspect_ratio
-from pycocotools import mask as mask_utils
 from scenedetect import AdaptiveDetector, detect
 from sklearn.linear_model import Ridge
 
 from phalp.configs.base import CACHE_DIR, BaseConfig
-from phalp.external.deep_sort_ import nn_matching
-from phalp.external.deep_sort_.detection import Detection
-from phalp.external.deep_sort_.tracker import Tracker
+from phalp.deep_sort import nn_matching
+from phalp.deep_sort.detection import Detection
+from phalp.deep_sort.tracker import Tracker
 from phalp.models.predictor import Pose_transformer_v2
-from phalp.utils import get_pylogger
-from phalp.utils.io_manager import IOManager
-from phalp.utils.utils import convert_pkl, get_prediction_interval, progress_bar, smpl_to_pose_camera_vector
-from phalp.utils.utils_dataset import process_image, process_mask
-from phalp.utils.utils_detectron2 import DefaultPredictor_Lazy, DefaultPredictor_with_RPN
-from phalp.utils.utils_download import cache_url
+
 from phalp.visualize.postprocessor import Postprocessor
 from phalp.visualize.visualizer import Visualizer
+
+from phalp.utils.utils import get_prediction_interval, progress_bar, smpl_to_pose_camera_vector
+from phalp.utils.utils_detectron2 import DefaultPredictor_Lazy
+from phalp.utils.video_writer import VideoWriter
+from phalp.utils.utils_download import cache_url
+from phalp.utils.bbox import get_cropped_image
+from phalp.utils import get_pylogger
 
 log = get_pylogger(__name__)
 
 
-class PHALP(nn.Module):
+class PHALPBase(nn.Module):
     def __init__(self, cfg: BaseConfig):
-        super(PHALP, self).__init__()
+        super(PHALPBase, self).__init__()
 
         self.cfg = cfg
         self.device = torch.device(self.cfg.device)
-        self.io_manager = IOManager(self.cfg.video, self.cfg.render.fps)
 
         # download wights and configs from Google Drive
         self.cached_download_from_drive()
@@ -66,11 +61,7 @@ class PHALP(nn.Module):
         self.train() if (self.cfg.train) else self.eval()
 
     def setup_hmr(self):
-        from phalp.models.hmar import HMAR
-
-        log.info("Loading HMAR model...")
-        self.HMAR = HMAR(self.cfg)
-        self.HMAR.load_weights(self.cfg.hmr.hmar_path)
+        raise NotImplementedError()
 
     def setup_predictor(self):
         log.info("Loading Predictor model...")
@@ -96,26 +87,10 @@ class PHALP(nn.Module):
             self.detectron2_cfg.train.init_checkpoint = "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/cascade_mask_rcnn_vitdet_h/f328730692/model_final_f05665.pkl"
             for i in range(3):
                 self.detectron2_cfg.model.roi_heads.box_predictors[i].test_score_thresh = 0.5
+
             self.detector = DefaultPredictor_Lazy(self.detectron2_cfg)
         else:
             raise ValueError(f"Detector {self.cfg.phalp.detector} not supported")
-
-        # for predicting masks with only bounding boxes, e.g. for running on ground truth tracks
-        self.setup_detectron2_with_RPN()
-        # TODO: make this work with DefaultPredictor_Lazy
-
-    def setup_detectron2_with_RPN(self):
-        self.detectron2_cfg = get_cfg()
-        self.detectron2_cfg.merge_from_file(
-            model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_3x.yaml")
-        )
-        self.detectron2_cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
-        self.detectron2_cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.4
-        self.detectron2_cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
-            "COCO-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_3x.yaml"
-        )
-        self.detectron2_cfg.MODEL.META_ARCHITECTURE = "GeneralizedRCNN_with_proposals"
-        self.detector_x = DefaultPredictor_with_RPN(self.detectron2_cfg)
 
     def setup_deepsort(self):
         log.info("Setting up DeepSort...")
@@ -139,26 +114,17 @@ class PHALP(nn.Module):
         # by default this will not be initialized
         self.postprocessor = Postprocessor(self.cfg, self)
 
-    def default_setup(self, video_name):
-        tracking_output_path = self.cfg.video.output_dir / video_name
-        tracking_output_path.mkdir(parents=True, exist_ok=True)
-        # (tracking_output_path / "results_tracks").mkdir(parents=True, exist_ok=True)
-        # (tracking_output_path / "_TMP").mkdir(parents=True, exist_ok=True)
-        # (tracking_output_path / "_DEMO").mkdir(parents=True, exist_ok=True)
-
-    def track(self):
+    def track(self, video_name: str, list_of_frames: List[Path]):
         eval_keys = ["tracked_ids", "tracked_bbox", "tid", "bbox", "tracked_time"]
         history_keys = ["appe", "loca", "pose", "uv"] if self.cfg.render.enable else []
         prediction_keys = ["prediction_uv", "prediction_pose", "prediction_loca"] if self.cfg.render.enable else []
         extra_keys_1 = ["center", "scale", "size", "img_path", "img_name", "class_name", "conf", "annotations"]
-        extra_keys_2 = ["smpl", "camera", "camera_bbox", "3d_joints", "2d_joints", "mask", "extra_data"]
+        extra_keys_2 = ["smpl", "camera", "camera_bbox", "3d_joints", "2d_joints", "mask"]
         history_keys = history_keys + extra_keys_1 + extra_keys_2
         visual_store_ = eval_keys + history_keys + prediction_keys
         tmp_keys_ = ["uv", "prediction_uv", "prediction_pose", "prediction_loca"]
 
-        # process the source video and return a list of frames
-        # source can be a video file, a youtube link or a image folder
-        video_name, list_of_frames, additional_data = self.io_manager.get_frames_from_source()
+        (self.cfg.video.output_dir / video_name).mkdir(parents=True, exist_ok=True)
 
         pkl_path = self.cfg.video.output_dir / f"{self.cfg.track_dataset}_{video_name}.pkl"
         video_path = self.cfg.video.output_dir / f"{self.cfg.base_tracker}_{video_name}.mp4"
@@ -172,232 +138,160 @@ class PHALP(nn.Module):
 
         # setup rendering, deep sort and directory structure
         self.setup_deepsort()
-        self.default_setup(video_name)
 
         log.info(f"Saving tracks at : {self.cfg.video.output_dir}")
 
-        try:
-            list_of_frames = (
-                list_of_frames
-                if self.cfg.phalp.start_frame == -1
-                else list_of_frames[self.cfg.phalp.start_frame : self.cfg.phalp.end_frame]
+        vwriter = VideoWriter(self.cfg.video, self.cfg.render.fps)
+
+        list_of_frames = (
+            list_of_frames
+            if self.cfg.phalp.start_frame == -1
+            else list_of_frames[self.cfg.phalp.start_frame : self.cfg.phalp.end_frame]
+        )
+        list_of_shots = self.get_list_of_shots(video_name, list_of_frames)
+
+        tracked_frames = []
+        final_visuals_dic = {}
+
+        for t_, frame_name in progress_bar(
+            enumerate(list_of_frames),
+            description=f"Tracking : {video_name}",
+            total=len(list_of_frames),
+            disable=False,
+        ):
+            image_frame = cv2.imread(str(frame_name))
+            img_height, img_width, _ = image_frame.shape
+            new_image_size = max(img_height, img_width)
+            top, left = (
+                (new_image_size - img_height) // 2,
+                (new_image_size - img_width) // 2,
             )
-            list_of_shots = self.get_list_of_shots(video_name, list_of_frames)
+            measurments = [img_height, img_width, new_image_size, left, top]
+            self.cfg.phalp.shot = 1 if t_ in list_of_shots else 0
 
-            tracked_frames = []
-            final_visuals_dic = {}
+            if self.cfg.render.enable:
+                # reset the renderer
+                # TODO: add a flag for full resolution rendering
+                self.cfg.render.up_scale = int(self.cfg.render.output_resolution / self.cfg.render.res)
+                self.visualizer.reset_render(self.cfg.render.res * self.cfg.render.up_scale)
 
-            for t_, frame_name in progress_bar(
-                enumerate(list_of_frames),
-                description=f"Tracking : {video_name}",
-                total=len(list_of_frames),
-                disable=False,
-            ):
-                image_frame = self.io_manager.read_frame(frame_name)
-                img_height, img_width, _ = image_frame.shape
-                new_image_size = max(img_height, img_width)
-                top, left = (
-                    (new_image_size - img_height) // 2,
-                    (new_image_size - img_width) // 2,
-                )
-                measurments = [img_height, img_width, new_image_size, left, top]
-                self.cfg.phalp.shot = 1 if t_ in list_of_shots else 0
+            ############ detection ##############
+            pred_bbox, pred_bbox_pad, pred_masks, pred_scores, pred_classes, gt_tids, gt_annots = self.get_detections(
+                image_frame, frame_name, t_
+            )
 
-                if self.cfg.render.enable:
-                    # reset the renderer
-                    # TODO: add a flag for full resolution rendering
-                    self.cfg.render.up_scale = int(self.cfg.render.output_resolution / self.cfg.render.res)
-                    self.visualizer.reset_render(self.cfg.render.res * self.cfg.render.up_scale)
+            ############ HMAR ##############
+            detections = self.get_human_features(
+                image_frame,
+                pred_masks,
+                pred_bbox,
+                pred_bbox_pad,
+                pred_scores,
+                frame_name,
+                pred_classes,
+                t_,
+                measurments,
+                gt_tids,
+                gt_annots,
+            )
 
-                ############ detection ##############
-                pred_bbox, pred_bbox_pad, pred_masks, pred_scores, pred_classes, gt_tids, gt_annots = (
-                    self.get_detections(image_frame, frame_name, t_, additional_data, measurments)
-                )
+            ############ tracking ##############
+            self.tracker.predict()
+            self.tracker.update(detections, t_, frame_name, self.cfg.phalp.shot)
 
-                ############ Run EXTRA models to attach to the detections ##############
-                extra_data = self.run_additional_models(
-                    image_frame,
-                    pred_bbox,
-                    pred_masks,
-                    pred_scores,
-                    pred_classes,
-                    frame_name,
-                    t_,
-                    measurments,
-                    gt_tids,
-                    gt_annots,
-                )
+            ############ record the results ##############
+            final_visuals_dic.setdefault(
+                frame_name, {"time": t_, "shot": self.cfg.phalp.shot, "frame_path": frame_name}
+            )
 
-                ############ HMAR ##############
-                detections = self.get_human_features(
-                    image_frame,
-                    pred_masks,
-                    pred_bbox,
-                    pred_bbox_pad,
-                    pred_scores,
-                    frame_name,
-                    pred_classes,
-                    t_,
-                    measurments,
-                    gt_tids,
-                    gt_annots,
-                    extra_data,
-                )
+            if self.cfg.render.enable:
+                final_visuals_dic[frame_name]["frame"] = image_frame
 
-                ############ tracking ##############
-                self.tracker.predict()
-                self.tracker.update(detections, t_, frame_name, self.cfg.phalp.shot)
+            for key_ in visual_store_:
+                final_visuals_dic[frame_name][key_] = []
 
-                ############ record the results ##############
-                final_visuals_dic.setdefault(
-                    frame_name, {"time": t_, "shot": self.cfg.phalp.shot, "frame_path": frame_name}
-                )
-                if self.cfg.render.enable:
-                    final_visuals_dic[frame_name]["frame"] = image_frame
-                for key_ in visual_store_:
-                    final_visuals_dic[frame_name][key_] = []
+            ############ record the track states (history and predictions) ##############
+            for tracks_ in self.tracker.tracks:
+                if frame_name not in tracked_frames:
+                    tracked_frames.append(frame_name)
+                if not (tracks_.is_confirmed()):
+                    continue
 
-                ############ record the track states (history and predictions) ##############
-                for tracks_ in self.tracker.tracks:
-                    if frame_name not in tracked_frames:
-                        tracked_frames.append(frame_name)
-                    if not (tracks_.is_confirmed()):
-                        continue
+                track_id = tracks_.track_id
+                track_data_hist = tracks_.track_data["history"][-1]
+                track_data_pred = tracks_.track_data["prediction"]
 
-                    track_id = tracks_.track_id
-                    track_data_hist = tracks_.track_data["history"][-1]
-                    track_data_pred = tracks_.track_data["prediction"]
+                final_visuals_dic[frame_name]["tid"].append(track_id)
+                final_visuals_dic[frame_name]["bbox"].append(track_data_hist["bbox"])
+                final_visuals_dic[frame_name]["tracked_time"].append(tracks_.time_since_update)
 
-                    final_visuals_dic[frame_name]["tid"].append(track_id)
-                    final_visuals_dic[frame_name]["bbox"].append(track_data_hist["bbox"])
-                    final_visuals_dic[frame_name]["tracked_time"].append(tracks_.time_since_update)
+                for hkey_ in history_keys:
+                    final_visuals_dic[frame_name][hkey_].append(track_data_hist[hkey_])
+                for pkey_ in prediction_keys:
+                    final_visuals_dic[frame_name][pkey_].append(track_data_pred[pkey_.split("_")[1]][-1])
 
-                    for hkey_ in history_keys:
-                        final_visuals_dic[frame_name][hkey_].append(track_data_hist[hkey_])
-                    for pkey_ in prediction_keys:
-                        final_visuals_dic[frame_name][pkey_].append(track_data_pred[pkey_.split("_")[1]][-1])
+                if tracks_.time_since_update == 0:
+                    final_visuals_dic[frame_name]["tracked_ids"].append(track_id)
+                    final_visuals_dic[frame_name]["tracked_bbox"].append(track_data_hist["bbox"])
 
-                    if tracks_.time_since_update == 0:
-                        final_visuals_dic[frame_name]["tracked_ids"].append(track_id)
-                        final_visuals_dic[frame_name]["tracked_bbox"].append(track_data_hist["bbox"])
+                    if tracks_.hits == self.cfg.phalp.n_init:
+                        for pt in range(self.cfg.phalp.n_init - 1):
+                            track_data_hist_ = tracks_.track_data["history"][-2 - pt]
+                            track_data_pred_ = tracks_.track_data["prediction"]
+                            frame_name_ = tracked_frames[-2 - pt]
+                            final_visuals_dic[frame_name_]["tid"].append(track_id)
+                            final_visuals_dic[frame_name_]["bbox"].append(track_data_hist_["bbox"])
+                            final_visuals_dic[frame_name_]["tracked_ids"].append(track_id)
+                            final_visuals_dic[frame_name_]["tracked_bbox"].append(track_data_hist_["bbox"])
+                            final_visuals_dic[frame_name_]["tracked_time"].append(0)
 
-                        if tracks_.hits == self.cfg.phalp.n_init:
-                            for pt in range(self.cfg.phalp.n_init - 1):
-                                track_data_hist_ = tracks_.track_data["history"][-2 - pt]
-                                track_data_pred_ = tracks_.track_data["prediction"]
-                                frame_name_ = tracked_frames[-2 - pt]
-                                final_visuals_dic[frame_name_]["tid"].append(track_id)
-                                final_visuals_dic[frame_name_]["bbox"].append(track_data_hist_["bbox"])
-                                final_visuals_dic[frame_name_]["tracked_ids"].append(track_id)
-                                final_visuals_dic[frame_name_]["tracked_bbox"].append(track_data_hist_["bbox"])
-                                final_visuals_dic[frame_name_]["tracked_time"].append(0)
+                            for hkey_ in history_keys:
+                                final_visuals_dic[frame_name_][hkey_].append(track_data_hist_[hkey_])
+                            for pkey_ in prediction_keys:
+                                final_visuals_dic[frame_name_][pkey_].append(track_data_pred_[pkey_.split("_")[1]][-1])
 
-                                for hkey_ in history_keys:
-                                    final_visuals_dic[frame_name_][hkey_].append(track_data_hist_[hkey_])
-                                for pkey_ in prediction_keys:
-                                    final_visuals_dic[frame_name_][pkey_].append(
-                                        track_data_pred_[pkey_.split("_")[1]][-1]
-                                    )
+            ############ save the video ##############
+            if self.cfg.render.enable and t_ >= self.cfg.phalp.n_init:
+                d_ = self.cfg.phalp.n_init + 1 if (t_ + 1 == len(list_of_frames)) else 1
+                for t__ in range(t_, t_ + d_):
+                    frame_key = list_of_frames[t__ - self.cfg.phalp.n_init]
+                    rendered_, f_size = self.visualizer.render_video(final_visuals_dic[frame_key])
 
-                ############ save the video ##############
-                if self.cfg.render.enable and t_ >= self.cfg.phalp.n_init:
-                    d_ = self.cfg.phalp.n_init + 1 if (t_ + 1 == len(list_of_frames)) else 1
-                    for t__ in range(t_, t_ + d_):
-                        frame_key = list_of_frames[t__ - self.cfg.phalp.n_init]
-                        rendered_, f_size = self.visualizer.render_video(final_visuals_dic[frame_key])
+                    # save the rendered frame
+                    vwriter.save_video(video_path, rendered_, f_size, t=t__ - self.cfg.phalp.n_init)
 
-                        # save the rendered frame
-                        self.io_manager.save_video(video_path, rendered_, f_size, t=t__ - self.cfg.phalp.n_init)
+                    # delete the frame after rendering it
+                    del final_visuals_dic[frame_key]["frame"]
 
-                        # delete the frame after rendering it
-                        del final_visuals_dic[frame_key]["frame"]
+                    # delete unnecessary keys
+                    for tkey_ in tmp_keys_:
+                        del final_visuals_dic[frame_key][tkey_]
 
-                        # delete unnecessary keys
-                        for tkey_ in tmp_keys_:
-                            del final_visuals_dic[frame_key][tkey_]
+        joblib.dump(final_visuals_dic, pkl_path, compress=3)
 
-            joblib.dump(final_visuals_dic, pkl_path, compress=3)
-            self.io_manager.close_video()
+        vwriter.close_video()
 
-            if self.cfg.use_gt:
-                joblib.dump(
-                    self.tracker.tracked_cost,
-                    self.cfg.video.output_dir / f"{video_name}_{self.cfg.phalp.start_frame}_distance.pkl",
-                )
+        if self.cfg.use_gt:
+            joblib.dump(
+                self.tracker.tracked_cost,
+                self.cfg.video.output_dir / f"{video_name}_{self.cfg.phalp.start_frame}_distance.pkl",
+            )
 
-            return final_visuals_dic, pkl_path
+        return final_visuals_dic, pkl_path
 
-        except Exception as e:
-            print(e)
-            print(traceback.format_exc())
+    def get_detections(self, image, frame_name, t_, additional_data={}, measurments=None):
+        outputs = self.detector(image)
+        instances = outputs["instances"]
+        instances = instances[instances.pred_classes == 0]
+        instances = instances[instances.scores > self.cfg.phalp.low_th_c]
 
-    def get_detections(self, image, frame_name, t_, additional_data=None, measurments=None):
-        if frame_name in additional_data.keys():
-            img_height, img_width, new_image_size, left, top = measurments
+        pred_bbox = instances.pred_boxes.tensor.cpu().numpy()
+        pred_masks = instances.pred_masks.cpu().numpy()
+        pred_scores = instances.scores.cpu().numpy()
+        pred_classes = instances.pred_classes.cpu().numpy()
 
-            gt_bbox = additional_data[frame_name]["gt_bbox"]
-            if len(additional_data[frame_name]["extra_data"]["gt_track_id"]) > 0:
-                ground_truth_track_id = additional_data[frame_name]["extra_data"]["gt_track_id"]
-            else:
-                ground_truth_track_id = [-1 for i in range(len(gt_bbox))]
-
-            if len(additional_data[frame_name]["extra_data"]["gt_class"]) > 0:
-                ground_truth_annotations = additional_data[frame_name]["extra_data"]["gt_class"]
-            else:
-                ground_truth_annotations = [[] for i in range(len(gt_bbox))]
-
-            inst = Instances((img_height, img_width))
-            bbox_array = []
-            class_array = []
-            scores_array = []
-
-            # for ava bbox format
-            # for bbox_ in gt_bbox:
-            #     x1 = bbox_[0] * img_width
-            #     y1 = bbox_[1] * img_height
-            #     x2 = bbox_[2] * img_width
-            #     y2 = bbox_[3] * img_height
-
-            # for posetrack bbox format
-            for bbox_ in gt_bbox:
-                x1 = bbox_[0]
-                y1 = bbox_[1]
-                x2 = bbox_[2] + x1
-                y2 = bbox_[3] + y1
-
-                bbox_array.append([x1, y1, x2, y2])
-                class_array.append(0)
-                scores_array.append(1)
-
-            bbox_array = np.array(bbox_array)
-            class_array = np.array(class_array)
-            box = Boxes(torch.as_tensor(bbox_array))
-            inst.pred_boxes = box
-            inst.pred_classes = torch.as_tensor(class_array)
-            inst.scores = torch.as_tensor(scores_array)
-
-            outputs_x = self.detector_x.predict_with_bbox(image, inst)
-            instances_x = outputs_x["instances"]
-            instances_people = instances_x[instances_x.pred_classes == 0]
-
-            pred_bbox = instances_people.pred_boxes.tensor.cpu().numpy()
-            pred_masks = instances_people.pred_masks.cpu().numpy()
-            pred_scores = instances_people.scores.cpu().numpy()
-            pred_classes = instances_people.pred_classes.cpu().numpy()
-
-        else:
-            outputs = self.detector(image)
-            instances = outputs["instances"]
-            instances = instances[instances.pred_classes == 0]
-            instances = instances[instances.scores > self.cfg.phalp.low_th_c]
-
-            pred_bbox = instances.pred_boxes.tensor.cpu().numpy()
-            pred_masks = instances.pred_masks.cpu().numpy()
-            pred_scores = instances.scores.cpu().numpy()
-            pred_classes = instances.pred_classes.cpu().numpy()
-
-            ground_truth_track_id = [1 for _ in range(len(pred_scores))]
-            ground_truth_annotations = [[] for _ in range(len(pred_scores))]
+        ground_truth_track_id = [1 for _ in range(len(pred_scores))]
+        ground_truth_annotations = [[] for _ in range(len(pred_scores))]
 
         return (
             pred_bbox,
@@ -408,52 +302,6 @@ class PHALP(nn.Module):
             ground_truth_track_id,
             ground_truth_annotations,
         )
-
-    def get_croped_image(self, image, bbox, bbox_pad, seg_mask):
-        # Encode the mask for storing, borrowed from tao dataset
-        # https://github.com/TAO-Dataset/tao/blob/master/scripts/detectors/detectron2_infer.py
-        masks_decoded = np.array(np.expand_dims(seg_mask, 2), order="F", dtype=np.uint8)
-        rles = mask_utils.encode(masks_decoded)
-        for rle in rles:
-            rle["counts"] = rle["counts"].decode("utf-8")
-
-        seg_mask = seg_mask.astype(int) * 255
-        if len(seg_mask.shape) == 2:
-            seg_mask = np.expand_dims(seg_mask, 2)
-            seg_mask = np.repeat(seg_mask, 3, 2)
-
-        center_ = np.array([(bbox[2] + bbox[0]) / 2, (bbox[3] + bbox[1]) / 2])
-        scale_ = np.array([(bbox[2] - bbox[0]), (bbox[3] - bbox[1])])
-
-        center_pad = np.array([(bbox_pad[2] + bbox_pad[0]) / 2, (bbox_pad[3] + bbox_pad[1]) / 2])
-        scale_pad = np.array([(bbox_pad[2] - bbox_pad[0]), (bbox_pad[3] - bbox_pad[1])])
-        mask_tmp = process_mask(seg_mask.astype(np.uint8), center_pad, 1.0 * np.max(scale_pad))
-        image_tmp = process_image(image, center_pad, 1.0 * np.max(scale_pad))
-
-        # bbox_        = expand_bbox_to_aspect_ratio(bbox, target_aspect_ratio=(192,256))
-        # center_x     = np.array([(bbox_[2] + bbox_[0])/2, (bbox_[3] + bbox_[1])/2])
-        # scale_x      = np.array([(bbox_[2] - bbox_[0]), (bbox_[3] - bbox_[1])])
-        # mask_tmp     = process_mask(seg_mask.astype(np.uint8), center_x, 1.0*np.max(scale_x))
-        # image_tmp    = process_image(image, center_x, 1.0*np.max(scale_x))
-
-        masked_image = torch.cat((image_tmp, mask_tmp[:1, :, :]), 0)
-
-        return masked_image, center_, scale_, rles, center_pad, scale_pad
-
-    def run_additional_models(
-        self,
-        image_frame,
-        pred_bbox,
-        pred_masks,
-        pred_scores,
-        pred_classes,
-        frame_name,
-        t_,
-        measurments,
-        gt_tids,
-        gt_annots,
-    ):
-        return list(range(len(pred_scores)))
 
     def get_human_features(
         self,
@@ -468,7 +316,6 @@ class PHALP(nn.Module):
         measurments,
         gt=1,
         ann=None,
-        extra_data=None,
     ):
         NPEOPLE = len(score)
 
@@ -486,7 +333,7 @@ class PHALP(nn.Module):
         for p_ in range(NPEOPLE):
             if bbox[p_][2] - bbox[p_][0] < self.cfg.phalp.small_w or bbox[p_][3] - bbox[p_][1] < self.cfg.phalp.small_h:
                 continue
-            masked_image, _center, _scale, rles, center_pad, scale_pad = self.get_croped_image(
+            masked_image, _center, _scale, rles, center_pad, scale_pad = get_cropped_image(
                 image, bbox[p_], bbox_pad[p_], seg_mask[p_]
             )
             masked_image_list.append(masked_image)
@@ -496,7 +343,7 @@ class PHALP(nn.Module):
             selected_ids.append(p_)
 
         if len(masked_image_list) == 0:
-            log.warning("No eligible bounding boxes found, phalp..{small_w, small_h} may be set too high.")
+            log.warning("No eligible bounding boxes found, phalp.{small_w, small_h} may be set too high.")
             return []
 
         masked_image_list = torch.stack(masked_image_list, dim=0)
@@ -562,7 +409,6 @@ class PHALP(nn.Module):
                 "time": t_,
                 "ground_truth": gt[p_],
                 "annotations": ann[p_],
-                "extra_data": extra_data[p_] if extra_data is not None else None,
                 "hmar_out_cam": hmar_out["pred_cam"].view(BS, -1).cpu().numpy(),
                 "hmar_out_cam_t": hmar_out["_pred_cam_t"].view(BS, -1).cpu().numpy(),
                 "hmar_out_focal_length": hmar_out["_focal_length"].view(BS, -1).cpu().numpy(),
@@ -661,7 +507,7 @@ class PHALP(nn.Module):
             new_en_loca_n = torch.from_numpy(np.array(new_en_loca_n))
             xt = torch.cat((en_loca_xy[:, -1, :, :].view(BS, 90), (new_en_loca_n.float()).view(BS, 9)), 1)
 
-        return xt
+            return xt
 
     def get_uv_distance(self, t_uv, d_uv):
         t_uv = torch.from_numpy(t_uv).cuda().float()
@@ -682,23 +528,6 @@ class PHALP(nn.Module):
         t_emb = t_emb.view(-1) / 10**3
         d_emb = d_emb.view(-1) / 10**3
         return t_emb.cpu().numpy(), d_emb.cpu().numpy(), torch.sum(mask_dt).cpu().numpy() / 4 / 256 / 256 / 2
-
-    def get_pose_distance(self, track_pose, detect_pose):
-        """Compute pair-wise squared l2 distances between points in `track_pose` and `detect_pose`."""
-        track_pose, detect_pose = np.asarray(track_pose), np.asarray(detect_pose)
-
-        if self.cfg.phalp.pose_distance == "smpl":
-            # remove additional dimension used for encoding location (last 3 elements)
-            track_pose = track_pose[:, :-3]
-            detect_pose = detect_pose[:, :-3]
-
-        if len(track_pose) == 0 or len(detect_pose) == 0:
-            return np.zeros((len(track_pose), len(detect_pose)))
-        track_pose2, detect_pose2 = np.square(track_pose).sum(axis=1), np.square(detect_pose).sum(axis=1)
-        r2 = -2.0 * np.dot(track_pose, detect_pose.T) + track_pose2[:, None] + detect_pose2[None, :]
-        r2 = np.clip(r2, 0.0, float(np.inf))
-
-        return r2
 
     def get_list_of_shots(self, video_name, list_of_frames):
         # https://github.com/Breakthrough/PySceneDetect
