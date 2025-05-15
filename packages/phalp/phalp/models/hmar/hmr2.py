@@ -1,11 +1,13 @@
+from dataclasses import asdict
 import torch
 import numpy as np
 
 from phalp.models.hmar.hmr import HMR2018Predictor
 from phalp.utils import get_pylogger
-from phalp.configs.base import CACHE_DIR
+from phalp.configs.base import CACHE_DIR, BaseConfig
 
-from hmr2.models import download_models, load_hmr2
+from hmr2.models import download_models
+from hmr2.models.hmr2 import HMR2, HMR2Output
 
 log = get_pylogger(__name__)
 
@@ -13,11 +15,15 @@ log = get_pylogger(__name__)
 class HMR2023TextureSampler(HMR2018Predictor):
     """HMR2023 model with texture sampling capabilities."""
 
-    def __init__(self, cfg) -> None:
+    def __init__(self, cfg: BaseConfig) -> None:
         super().__init__(cfg)
         download_models()
 
-        self.model, _ = load_hmr2()
+        self.model = HMR2.load_from_checkpoint(
+            CACHE_DIR / "4DHumans/logs/train/multiruns/hmr2/0/checkpoints/epoch=35-step=1000000.ckpt",
+            strict=False,
+            cfg=cfg,
+        )
         self.model.eval()
 
         # Model's all set up. Now, load tex_bmap and tex_fmap
@@ -44,11 +50,12 @@ class HMR2023TextureSampler(HMR2018Predictor):
         )
 
     def forward(self, x):
+        # x: torch.Tensor of shape (num_valid_persons, C+1=4, H=256, W=256)
         batch = {
             "img": x[:, :3, :, :],
             "mask": (x[:, 3, :, :]).clip(0, 1),
         }
-        model_out = self.model(batch)
+        model_out: HMR2Output = self.model(batch)
 
         def unproject_uvmap_to_mesh(bmap, fmap, verts, faces):
             # bmap:  256,256,3
@@ -68,7 +75,7 @@ class HMR2023TextureSampler(HMR2018Predictor):
 
             return map_verts, valid_mask
 
-        pred_verts = model_out["pred_vertices"] + model_out["pred_cam_t"].unsqueeze(1)
+        pred_verts = model_out.pred_vertices + model_out.pred_cam_t.unsqueeze(1)
         device = pred_verts.device
         face_tensor = torch.tensor(self.smpl.faces.astype(np.int64), dtype=torch.long, device=device)
         map_verts, valid_mask = unproject_uvmap_to_mesh(self.tex_bmap, self.tex_fmap, pred_verts, face_tensor)  # B,N,3
@@ -115,9 +122,6 @@ class HMR2023TextureSampler(HMR2018Predictor):
         out = {
             "uv_image": uv_image,
             "uv_vector": self.hmar_old.process_uv_image(uv_image),
-            "pose_smpl": model_out["pred_smpl_params"],
-            "pred_cam": model_out["pred_cam"],
-            "_pred_cam_t": model_out["pred_cam_t"],
-            "_focal_length": model_out["focal_length"],
         }
+        out.update(asdict(model_out))
         return out

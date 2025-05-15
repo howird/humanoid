@@ -1,20 +1,48 @@
+from dataclasses import asdict, dataclass
+from smplx.utils import ModelOutput, SMPLOutput
 import torch
 from torch.optim import lr_scheduler
 import pytorch_lightning as pl
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Tuple, Optional
 
 from yacs.config import CfgNode
 
-from ..utils import SkeletonRenderer, MeshRenderer
-from ..utils.geometry import aa_to_rotmat, perspective_projection
-from ..utils.pylogger import get_pylogger
-from .backbones import create_backbone
-from .heads import build_smpl_head
-from .discriminator import Discriminator
-from .losses import Keypoint3DLoss, Keypoint2DLoss, ParameterLoss
-from . import SMPL
+from hmr2.utils import SkeletonRenderer, MeshRenderer
+from hmr2.utils.geometry import aa_to_rotmat, perspective_projection
+from hmr2.utils.pylogger import get_pylogger
+from hmr2.models.backbones import create_backbone
+from hmr2.models.heads.smpl_head import SMPLPredParams, SMPLTransformerDecoderHead
+from hmr2.models.discriminator import Discriminator
+from hmr2.models.losses import Keypoint3DLoss, Keypoint2DLoss, ParameterLoss
+from hmr2.models.smpl_wrapper import SMPL
 
 log = get_pylogger(__name__)
+
+
+@dataclass
+class HMR2Output(SMPLPredParams):
+    """Output of the HMR2 model.
+
+    Inherits from SMPLPredParams and adds additional fields for camera parameters,
+    keypoints, and vertices.
+
+    Attributes:
+        pred_cam: Camera parameters of shape (B, 3)
+        pred_cam_t: Camera translation of shape (B, 3)
+        focal_length: Focal length of shape (B, 2)
+        pred_keypoints_3d: 3D keypoints of shape (B, N, 3)
+        pred_keypoints_2d: 2D keypoints of shape (B, N, 2)
+        pred_vertices: Mesh vertices of shape (B, V, 3)
+        losses: Optional dictionary of losses
+    """
+
+    pred_cam: torch.Tensor
+    pred_cam_t: torch.Tensor
+    focal_length: torch.Tensor
+    pred_keypoints_3d: torch.Tensor
+    pred_keypoints_2d: torch.Tensor
+    pred_vertices: torch.Tensor
+    losses: Optional[Dict[str, torch.Tensor]] = None
 
 
 class HMR2(pl.LightningModule):
@@ -32,17 +60,17 @@ class HMR2(pl.LightningModule):
         self.cfg = cfg
         # Create backbone feature extractor
         self.backbone = create_backbone(cfg)
-        if cfg.MODEL.BACKBONE.get("PRETRAINED_WEIGHTS", None):
+        if cfg.MODEL.BACKBONE.PRETRAINED_WEIGHTS:
             log.info(f"Loading backbone weights from {cfg.MODEL.BACKBONE.PRETRAINED_WEIGHTS}")
             self.backbone.load_state_dict(
                 torch.load(cfg.MODEL.BACKBONE.PRETRAINED_WEIGHTS, map_location="cpu")["state_dict"]
             )
 
         # Create SMPL head
-        self.smpl_head = build_smpl_head(cfg)
+        self.smpl_head = SMPLTransformerDecoderHead(cfg)
 
         # Create discriminator
-        if self.cfg.LOSS_WEIGHTS.ADVERSARIAL > 0:
+        if hasattr(self.cfg, "LOSS_WEIGHTS") and self.cfg.LOSS_WEIGHTS.ADVERSARIAL > 0:
             self.discriminator = Discriminator()
 
         # Define loss functions
@@ -51,8 +79,7 @@ class HMR2(pl.LightningModule):
         self.smpl_parameter_loss = ParameterLoss()
 
         # Instantiate SMPL model
-        smpl_cfg = {k.lower(): v for k, v in dict(cfg.SMPL).items()}
-        smpl_cfg["model_path"] = "/home/howard/humanoid/data/smpl"
+        smpl_cfg = {k.lower(): v for k, v in asdict(cfg.SMPL).items()}
         self.smpl = SMPL(**smpl_cfg)
 
         # Buffer that shows whetheer we need to initialize ActNorm layers
@@ -92,14 +119,16 @@ class HMR2(pl.LightningModule):
 
         return optimizer, optimizer_disc
 
-    def forward_step(self, batch: Dict, train: bool = False) -> Dict:
+    def forward_step(self, batch: Dict, train: bool = False) -> HMR2Output:
         """
         Run a forward step of the network
         Args:
-            batch (Dict): Dictionary containing batch data
+            batch (Dict): Dictionary containing:
+                - img: Input RGB image of shape (B, 3, H, W)
+                - mask: Optional segmentation mask of shape (B, H, W)
             train (bool): Flag indicating whether it is training or validation mode
         Returns:
-            Dict: Dictionary containing the regression output
+            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
 
         # Use RGB image as input
@@ -108,18 +137,14 @@ class HMR2(pl.LightningModule):
 
         # Compute conditioning features using the backbone
         # if using ViT backbone, we need to use a different aspect ratio
-        conditioning_feats = self.backbone(x[:, :, :, 32:-32])
+        conditioning_feats = self.backbone(x[:, :, :, 32:-32])  # (BS, 3, 256, 192) -> (BS, 1280, 16, 12)
 
+        pred_smpl_params: SMPLPredParams
         pred_smpl_params, pred_cam, _ = self.smpl_head(conditioning_feats)
 
-        # Store useful regression outputs to the output dict
-        output = {}
-        output["pred_cam"] = pred_cam
-        output["pred_smpl_params"] = {k: v.clone() for k, v in pred_smpl_params.items()}
-
         # Compute camera translation
-        device = pred_smpl_params["body_pose"].device
-        dtype = pred_smpl_params["body_pose"].dtype
+        device = pred_smpl_params.body_pose.device
+        dtype = pred_smpl_params.body_pose.dtype
         focal_length = self.cfg.EXTRA.FOCAL_LENGTH * torch.ones(batch_size, 2, device=device, dtype=dtype)
         pred_cam_t = torch.stack(
             [
@@ -129,48 +154,56 @@ class HMR2(pl.LightningModule):
             ],
             dim=-1,
         )
-        output["pred_cam_t"] = pred_cam_t
-        output["focal_length"] = focal_length
 
         # Compute model vertices, joints and the projected joints
-        pred_smpl_params["global_orient"] = pred_smpl_params["global_orient"].reshape(batch_size, -1, 3, 3)
-        pred_smpl_params["body_pose"] = pred_smpl_params["body_pose"].reshape(batch_size, -1, 3, 3)
-        pred_smpl_params["betas"] = pred_smpl_params["betas"].reshape(batch_size, -1)
-        smpl_output = self.smpl(**{k: v.float() for k, v in pred_smpl_params.items()}, pose2rot=False)
+        smpl_output: ModelOutput = self.smpl(pred_smpl_params)
+
         pred_keypoints_3d = smpl_output.joints
         pred_vertices = smpl_output.vertices
-        output["pred_keypoints_3d"] = pred_keypoints_3d.reshape(batch_size, -1, 3)
-        output["pred_vertices"] = pred_vertices.reshape(batch_size, -1, 3)
+
+        pred_keypoints_3d = pred_keypoints_3d.reshape(batch_size, -1, 3)
+        pred_vertices = pred_vertices.reshape(batch_size, -1, 3)
         pred_cam_t = pred_cam_t.reshape(-1, 3)
         focal_length = focal_length.reshape(-1, 2)
         pred_keypoints_2d = perspective_projection(
             pred_keypoints_3d, translation=pred_cam_t, focal_length=focal_length / self.cfg.MODEL.IMAGE_SIZE
         )
 
-        output["pred_keypoints_2d"] = pred_keypoints_2d.reshape(batch_size, -1, 2)
-        output["global_orient"] = pred_smpl_params["global_orient"]
-        output["body_pose"] = pred_smpl_params["body_pose"]
-        output["betas"] = pred_smpl_params["betas"]
-        return output
+        return HMR2Output(
+            global_orient=pred_smpl_params.global_orient,
+            body_pose=pred_smpl_params.body_pose,
+            betas=pred_smpl_params.betas,
+            pred_cam=pred_cam,
+            pred_cam_t=pred_cam_t,
+            focal_length=focal_length,
+            pred_keypoints_3d=pred_keypoints_3d,
+            pred_keypoints_2d=pred_keypoints_2d,
+            pred_vertices=pred_vertices,
+        )
 
-    def compute_loss(self, batch: Dict, output: Dict, train: bool = True) -> torch.Tensor:
+    def compute_loss(self, batch: Dict, output: HMR2Output, train: bool = True) -> torch.Tensor:
         """
         Compute losses given the input batch and the regression output
         Args:
-            batch (Dict): Dictionary containing batch data
-            output (Dict): Dictionary containing the regression output
+            batch (Dict): Dictionary containing:
+                - img: Input RGB image of shape (B, 3, H, W)
+                - mask: Optional segmentation mask of shape (B, H, W)
+                - keypoints_2d: 2D keypoints of shape (B, N, 2)
+                - keypoints_3d: 3D keypoints of shape (B, N, 3)
+                - smpl_params: Dictionary of SMPL parameters
+                - has_smpl_params: Dictionary of flags indicating valid SMPL parameters
+                - smpl_params_is_axis_angle: Dictionary of flags indicating axis-angle representation
+            output (HMR2Output): Output from forward step
             train (bool): Flag indicating whether it is training or validation mode
         Returns:
             torch.Tensor : Total loss for current batch
         """
+        pred_keypoints_2d = output.pred_keypoints_2d
+        pred_keypoints_3d = output.pred_keypoints_3d
 
-        pred_smpl_params = output["pred_smpl_params"]
-        pred_keypoints_2d = output["pred_keypoints_2d"]
-        pred_keypoints_3d = output["pred_keypoints_3d"]
-
-        batch_size = pred_smpl_params["body_pose"].shape[0]
-        device = pred_smpl_params["body_pose"].device
-        dtype = pred_smpl_params["body_pose"].dtype
+        batch_size = output.body_pose.shape[0]
+        device = output.body_pose.device
+        dtype = output.body_pose.dtype
 
         # Get annotations
         gt_keypoints_2d = batch["keypoints_2d"]
@@ -185,7 +218,11 @@ class HMR2(pl.LightningModule):
 
         # Compute loss on SMPL parameters
         loss_smpl_params = {}
-        for k, pred in pred_smpl_params.items():
+        for k, pred in [
+            ("global_orient", output.global_orient),
+            ("body_pose", output.body_pose),
+            ("betas", output.betas),
+        ]:
             gt = gt_smpl_params[k].view(batch_size, -1)
             if is_axis_angle[k].all():
                 gt = aa_to_rotmat(gt.reshape(-1, 3)).view(batch_size, -1, 3, 3)
@@ -209,39 +246,41 @@ class HMR2(pl.LightningModule):
         for k, v in loss_smpl_params.items():
             losses["loss_" + k] = v.detach()
 
-        output["losses"] = losses
+        output.losses = losses
 
         return loss
 
     # Tensoroboard logging should run from first rank only
     @pl.utilities.rank_zero.rank_zero_only
     def tensorboard_logging(
-        self, batch: Dict, output: Dict, step_count: int, train: bool = True, write_to_summary_writer: bool = True
+        self, batch: Dict, output: HMR2Output, step_count: int, train: bool = True, write_to_summary_writer: bool = True
     ) -> None:
         """
         Log results to Tensorboard
         Args:
-            batch (Dict): Dictionary containing batch data
-            output (Dict): Dictionary containing the regression output
+            batch (Dict): Dictionary containing:
+                - img: Input RGB image of shape (B, 3, H, W)
+                - mask: Optional segmentation mask of shape (B, H, W)
+                - keypoints_2d: 2D keypoints of shape (B, N, 2)
+                - keypoints_3d: 3D keypoints of shape (B, N, 3)
+            output (HMR2Output): Output from forward step
             step_count (int): Global training step count
             train (bool): Flag indicating whether it is training or validation mode
         """
-
         mode = "train" if train else "val"
         batch_size = batch["keypoints_2d"].shape[0]
         images = batch["img"]
         images = images * torch.tensor([0.229, 0.224, 0.225], device=images.device).reshape(1, 3, 1, 1)
         images = images + torch.tensor([0.485, 0.456, 0.406], device=images.device).reshape(1, 3, 1, 1)
-        # images = 255*images.permute(0, 2, 3, 1).cpu().numpy()
 
-        pred_keypoints_3d = output["pred_keypoints_3d"].detach().reshape(batch_size, -1, 3)
-        pred_vertices = output["pred_vertices"].detach().reshape(batch_size, -1, 3)
-        focal_length = output["focal_length"].detach().reshape(batch_size, 2)
+        pred_keypoints_3d = output.pred_keypoints_3d.detach().reshape(batch_size, -1, 3)
+        pred_vertices = output.pred_vertices.detach().reshape(batch_size, -1, 3)
+        focal_length = output.focal_length.detach().reshape(batch_size, 2)
         gt_keypoints_3d = batch["keypoints_3d"]
         gt_keypoints_2d = batch["keypoints_2d"]
-        losses = output["losses"]
-        pred_cam_t = output["pred_cam_t"].detach().reshape(batch_size, 3)
-        pred_keypoints_2d = output["pred_keypoints_2d"].detach().reshape(batch_size, -1, 2)
+        losses = output.losses
+        pred_cam_t = output.pred_cam_t.detach().reshape(batch_size, 3)
+        pred_keypoints_2d = output.pred_keypoints_2d.detach().reshape(batch_size, -1, 2)
 
         if write_to_summary_writer:
             summary_writer = self.logger.experiment
@@ -250,14 +289,8 @@ class HMR2(pl.LightningModule):
         num_images = min(batch_size, self.cfg.EXTRA.NUM_LOG_IMAGES)
 
         gt_keypoints_3d = batch["keypoints_3d"]
-        pred_keypoints_3d = output["pred_keypoints_3d"].detach().reshape(batch_size, -1, 3)
+        pred_keypoints_3d = output.pred_keypoints_3d.detach().reshape(batch_size, -1, 3)
 
-        # We render the skeletons instead of the full mesh because rendering a lot of meshes will make the training slow.
-        # predictions = self.renderer(pred_keypoints_3d[:num_images],
-        #                            gt_keypoints_3d[:num_images],
-        #                            2 * gt_keypoints_2d[:num_images],
-        #                            images=images[:num_images],
-        #                            camera_translation=pred_cam_t[:num_images])
         predictions = self.mesh_renderer.visualize_tensorboard(
             pred_vertices[:num_images].cpu().numpy(),
             pred_cam_t[:num_images].cpu().numpy(),
@@ -271,13 +304,15 @@ class HMR2(pl.LightningModule):
 
         return predictions
 
-    def forward(self, batch: Dict) -> Dict:
+    def forward(self, batch: Dict) -> HMR2Output:
         """
         Run a forward step of the network in val mode
         Args:
-            batch (Dict): Dictionary containing batch data
+            batch (Dict): Dictionary containing:
+                - img: Input RGB image of shape (B, 3, H, W)
+                - mask: Optional segmentation mask of shape (B, H, W)
         Returns:
-            Dict: Dictionary containing the regression output
+            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
         return self.forward_step(batch, train=False)
 
@@ -309,15 +344,23 @@ class HMR2(pl.LightningModule):
         optimizer.step()
         return loss_disc.detach()
 
-    def training_step(self, joint_batch: Dict, batch_idx: int) -> Dict:
+    def training_step(self, joint_batch: Dict, batch_idx: int) -> HMR2Output:
         """
         Run a full training step
         Args:
-            joint_batch (Dict): Dictionary containing image and mocap batch data
+            joint_batch (Dict): Dictionary containing:
+                - img: Dictionary with:
+                    - img: Input RGB image of shape (B, 3, H, W)
+                    - mask: Optional segmentation mask of shape (B, H, W)
+                    - keypoints_2d: 2D keypoints of shape (B, N, 2)
+                    - keypoints_3d: 3D keypoints of shape (B, N, 3)
+                    - smpl_params: Dictionary of SMPL parameters
+                    - has_smpl_params: Dictionary of flags indicating valid SMPL parameters
+                    - smpl_params_is_axis_angle: Dictionary of flags indicating axis-angle representation
+                - mocap: Dictionary with mocap data for adversarial training
             batch_idx (int): Unused.
-            batch_idx (torch.Tensor): Unused.
         Returns:
-            Dict: Dictionary containing regression output.
+            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
         batch = joint_batch["img"]
         mocap_batch = joint_batch["mocap"]
@@ -327,13 +370,12 @@ class HMR2(pl.LightningModule):
 
         batch_size = batch["img"].shape[0]
         output = self.forward_step(batch, train=True)
-        pred_smpl_params = output["pred_smpl_params"]
         if self.cfg.get("UPDATE_GT_SPIN", False):
             self.update_batch_gt_spin(batch, output)
         loss = self.compute_loss(batch, output, train=True)
         if self.cfg.LOSS_WEIGHTS.ADVERSARIAL > 0:
             disc_out = self.discriminator(
-                pred_smpl_params["body_pose"].reshape(batch_size, -1), pred_smpl_params["betas"].reshape(batch_size, -1)
+                output.body_pose.reshape(batch_size, -1), output.betas.reshape(batch_size, -1)
             )
             loss_adv = ((disc_out - 1.0) ** 2).sum() / batch_size
             loss = loss + self.cfg.LOSS_WEIGHTS.ADVERSARIAL * loss_adv
@@ -354,33 +396,39 @@ class HMR2(pl.LightningModule):
         if self.cfg.LOSS_WEIGHTS.ADVERSARIAL > 0:
             loss_disc = self.training_step_discriminator(
                 mocap_batch,
-                pred_smpl_params["body_pose"].reshape(batch_size, -1),
-                pred_smpl_params["betas"].reshape(batch_size, -1),
+                output.body_pose.reshape(batch_size, -1),
+                output.betas.reshape(batch_size, -1),
                 optimizer_disc,
             )
-            output["losses"]["loss_gen"] = loss_adv
-            output["losses"]["loss_disc"] = loss_disc
+            output.losses["loss_gen"] = loss_adv
+            output.losses["loss_disc"] = loss_disc
 
         if self.global_step > 0 and self.global_step % self.cfg.GENERAL.LOG_STEPS == 0:
             self.tensorboard_logging(batch, output, self.global_step, train=True)
 
-        self.log("train/loss", output["losses"]["loss"], on_step=True, on_epoch=True, prog_bar=True, logger=False)
+        self.log("train/loss", output.losses["loss"], on_step=True, on_epoch=True, prog_bar=True, logger=False)
 
         return output
 
-    def validation_step(self, batch: Dict, batch_idx: int, dataloader_idx=0) -> Dict:
+    def validation_step(self, batch: Dict, batch_idx: int, dataloader_idx=0) -> HMR2Output:
         """
         Run a validation step and log to Tensorboard
         Args:
-            batch (Dict): Dictionary containing batch data
+            batch (Dict): Dictionary containing:
+                - img: Input RGB image of shape (B, 3, H, W)
+                - mask: Optional segmentation mask of shape (B, H, W)
+                - keypoints_2d: 2D keypoints of shape (B, N, 2)
+                - keypoints_3d: 3D keypoints of shape (B, N, 3)
+                - smpl_params: Dictionary of SMPL parameters
+                - has_smpl_params: Dictionary of flags indicating valid SMPL parameters
+                - smpl_params_is_axis_angle: Dictionary of flags indicating axis-angle representation
             batch_idx (int): Unused.
         Returns:
-            Dict: Dictionary containing regression output.
+            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
-        # batch_size = batch['img'].shape[0]
         output = self.forward_step(batch, train=False)
         loss = self.compute_loss(batch, output, train=False)
-        output["loss"] = loss
+        output.losses = {"loss": loss}
         self.tensorboard_logging(batch, output, self.global_step, train=False)
 
         return output

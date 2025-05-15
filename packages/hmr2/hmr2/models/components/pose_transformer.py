@@ -6,12 +6,12 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch import nn
 
-from .t_cond_mlp import (
+from hmr2.models.components.t_cond_mlp import (
     AdaptiveLayerNorm1D,
     FrequencyEmbedder,
     normalization_layer,
 )
-# from .vit import Attention, FeedForward
+# from hmr2.models.backbones.vit import Attention, FeedForward
 
 
 def exists(val):
@@ -331,7 +331,7 @@ class TransformerDecoder(nn.Module):
         )
 
     def forward(self, inp: torch.Tensor, *args, context=None, context_list=None):
-        x = self.to_token_embedding(inp)
+        x = self.to_token_embedding(inp)  # (BS, 1, 1) -> (BS, 1, 1024)
         b, n, _ = x.shape
 
         x = self.dropout(x)

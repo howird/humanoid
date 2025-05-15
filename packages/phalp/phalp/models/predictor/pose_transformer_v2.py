@@ -332,7 +332,7 @@ class lart_transformer(nn.Module):
 
 
 class Pose_transformer_v2(nn.Module):
-    def __init__(self, cfg, phalp_tracker):
+    def __init__(self, cfg, smpl_model):
         super(Pose_transformer_v2, self).__init__()
 
         self.phalp_cfg = cfg
@@ -362,7 +362,7 @@ class Pose_transformer_v2(nn.Module):
         self.register_buffer("mean", self.mean_)
         self.register_buffer("std", self.std_)
 
-        self.smpl = phalp_tracker.HMAR.smpl
+        self.smpl = smpl_model
 
     def load_weights(self, path):
         # import ipdb; ipdb.set_trace()

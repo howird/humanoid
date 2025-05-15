@@ -101,8 +101,9 @@ class Renderer:
         self.metallicFactor = metallicFactor
         self.roughnessFactor = roughnessFactor
 
-    def __del__(self):
-        del self.renderer
+    # TODO(howird): causes error when there are few frames, not sure why (or if the few frames is the actual problem)
+    # def __del__(self):
+    #     del self.renderer
 
     def visualize_all(self, vertices, camera_translation, color, images, use_image=True):
         baseColorFactors = np.hstack([color[:, [2, 1, 0]], np.ones((color.shape[0], 1))])

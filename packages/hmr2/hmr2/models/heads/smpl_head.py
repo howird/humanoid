@@ -1,13 +1,30 @@
+from dataclasses import asdict, dataclass
+from phalp.configs.base import BaseConfig
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import einops
 
-from typing import Union
+from typing import Tuple, Dict
 
-from ...utils.geometry import rot6d_to_rotmat, aa_to_rotmat
-from ..components.pose_transformer import TransformerDecoder
+from hmr2.utils.geometry import rot6d_to_rotmat, aa_to_rotmat
+from hmr2.models.components.pose_transformer import TransformerDecoder
+
+
+@dataclass
+class SMPLPredParams:
+    """SMPL prediction parameters.
+
+    Attributes:
+        global_orient: Global rotation matrices of shape (B, 1, 3, 3)
+        body_pose: Body joint rotation matrices of shape (B, 23, 3, 3)
+        betas: Shape parameters of shape (B, 10)
+    """
+
+    global_orient: torch.Tensor
+    body_pose: torch.Tensor
+    betas: torch.Tensor
 
 
 def build_smpl_head(cfg):
@@ -21,27 +38,26 @@ def build_smpl_head(cfg):
 class SMPLTransformerDecoderHead(nn.Module):
     """Cross-attention based SMPL Transformer decoder"""
 
-    def __init__(self, cfg):
+    def __init__(self, cfg: BaseConfig):
         super().__init__()
         self.cfg = cfg
-        self.joint_rep_type = cfg.MODEL.SMPL_HEAD.get("JOINT_REP", "6d")
+        self.joint_rep_type = self.cfg.MODEL.SMPL_HEAD.JOINT_REP
         self.joint_rep_dim = {"6d": 6, "aa": 3}[self.joint_rep_type]
-        npose = self.joint_rep_dim * (cfg.SMPL.NUM_BODY_JOINTS + 1)
-        self.npose = npose
-        self.input_is_mean_shape = cfg.MODEL.SMPL_HEAD.get("TRANSFORMER_INPUT", "zero") == "mean_shape"
+        self.npose = self.joint_rep_dim * (cfg.SMPL.NUM_BODY_JOINTS + 1)
+        self.input_is_mean_shape = cfg.MODEL.SMPL_HEAD.TRANSFORMER_INPUT == "mean_shape"
         transformer_args = dict(
             num_tokens=1,
-            token_dim=(npose + 10 + 3) if self.input_is_mean_shape else 1,
+            token_dim=(self.npose + 10 + 3) if self.input_is_mean_shape else 1,
             dim=1024,
         )
-        transformer_args.update(dict(cfg.MODEL.SMPL_HEAD.TRANSFORMER_DECODER))
+        transformer_args.update(asdict(cfg.MODEL.SMPL_HEAD.TRANSFORMER_DECODER))
         self.transformer = TransformerDecoder(**transformer_args)
         dim = transformer_args["dim"]
-        self.decpose = nn.Linear(dim, npose)
+        self.decpose = nn.Linear(dim, self.npose)
         self.decshape = nn.Linear(dim, 10)
         self.deccam = nn.Linear(dim, 3)
 
-        if cfg.MODEL.SMPL_HEAD.get("INIT_DECODER_XAVIER", False):
+        if cfg.MODEL.SMPL_HEAD.INIT_DECODER_XAVIER:
             # True by default in MLP. False by default in Transformer
             nn.init.xavier_uniform_(self.decpose.weight, gain=0.01)
             nn.init.xavier_uniform_(self.decshape.weight, gain=0.01)
@@ -55,7 +71,28 @@ class SMPLTransformerDecoderHead(nn.Module):
         self.register_buffer("init_betas", init_betas)
         self.register_buffer("init_cam", init_cam)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x: torch.Tensor) -> Tuple[SMPLPredParams, torch.Tensor, Dict[str, torch.Tensor]]:
+        """Forward pass of the SMPL Transformer decoder head.
+
+        This method takes a feature map from a backbone network and predicts SMPL parameters
+        using an iterative error feedback (IEF) approach. The prediction is done in multiple
+        iterations, where each iteration refines the previous prediction.
+
+        Args:
+            x: Input feature map from backbone of shape (B, C, H, W)
+                where B is batch size, C is number of channels, H and W are spatial dimensions
+
+        Returns:
+            pred_smpl_params: SMPLPredParams containing:
+                - global_orient: Global rotation matrices of shape (B, 1, 3, 3)
+                - body_pose: Body joint rotation matrices of shape (B, 23, 3, 3)
+                - betas: Shape parameters of shape (B, 10)
+            pred_cam: Camera parameters of shape (B, 3)
+            pred_smpl_params_list: Dictionary containing lists of SMPL parameters from each iteration:
+                - body_pose: Body pose matrices of shape (IEF_ITERS, B, 23, 3, 3)
+                - betas: Shape parameters of shape (IEF_ITERS, B, 10)
+                - cam: Camera parameters of shape (IEF_ITERS, B, 3)
+        """
         batch_size = x.shape[0]
         # vit pretrained backbone is channel-first. Change to token-first
         x = einops.rearrange(x, "b c h w -> b (h w) c")
@@ -74,21 +111,22 @@ class SMPLTransformerDecoderHead(nn.Module):
         pred_body_pose_list = []
         pred_betas_list = []
         pred_cam_list = []
-        for i in range(self.cfg.MODEL.SMPL_HEAD.get("IEF_ITERS", 1)):
+        for _ in range(self.cfg.MODEL.SMPL_HEAD.IEF_ITERS):
             # Input token to transformer is zero token
             if self.input_is_mean_shape:
                 token = torch.cat([pred_body_pose, pred_betas, pred_cam], dim=1)[:, None, :]
             else:
                 token = torch.zeros(batch_size, 1, 1).to(x.device)
 
-            # Pass through transformer
+            # Pass through transformer (B, 1, 1) -> (B, 1, 1024)
             token_out = self.transformer(token, context=x)
-            token_out = token_out.squeeze(1)  # (B, C)
+            token_out = token_out.squeeze(1)  # (B, C=1024)
 
             # Readout from token_out
             pred_body_pose = self.decpose(token_out) + pred_body_pose
             pred_betas = self.decshape(token_out) + pred_betas
             pred_cam = self.deccam(token_out) + pred_cam
+
             pred_body_pose_list.append(pred_body_pose)
             pred_betas_list.append(pred_betas)
             pred_cam_list.append(pred_cam)
@@ -106,9 +144,9 @@ class SMPLTransformerDecoderHead(nn.Module):
         pred_smpl_params_list["cam"] = torch.cat(pred_cam_list, dim=0)
         pred_body_pose = joint_conversion_fn(pred_body_pose).view(batch_size, self.cfg.SMPL.NUM_BODY_JOINTS + 1, 3, 3)
 
-        pred_smpl_params = {
-            "global_orient": pred_body_pose[:, [0]],
-            "body_pose": pred_body_pose[:, 1:],
-            "betas": pred_betas,
-        }
+        pred_smpl_params = SMPLPredParams(
+            global_orient=pred_body_pose[:, [0]],
+            body_pose=pred_body_pose[:, 1:],
+            betas=pred_betas,
+        )
         return pred_smpl_params, pred_cam, pred_smpl_params_list

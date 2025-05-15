@@ -12,7 +12,7 @@ import torchvision
 
 from pytube import YouTube
 
-from phalp.configs.base import VideoConfig
+from phalp.configs.base import VideoIOConfig
 from phalp.utils import get_pylogger
 
 log = get_pylogger(__name__)
@@ -26,9 +26,9 @@ class FrameExtractor:
 
     def __init__(self, video_path):
         self.video_path = video_path
-        self.vid_cap = cv2.VideoCapture(video_path)
-        self.n_frames = int(self.vid_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.fps = int(self.vid_cap.get(cv2.CAP_PROP_FPS))
+        self.vid_cap = cv2.VideoCapture(video_path)  # type: ignore
+        self.n_frames = int(self.vid_cap.get(cv2.CAP_PROP_FRAME_COUNT))  # type: ignore
+        self.fps = int(self.vid_cap.get(cv2.CAP_PROP_FPS))  # type: ignore
 
     def get_video_duration(self):
         duration = self.n_frames / self.fps
@@ -48,7 +48,7 @@ class FrameExtractor:
         end_frame: int = 2000,
     ) -> List[Path]:
         if not self.vid_cap.isOpened():
-            self.vid_cap = cv2.VideoCapture(self.video_path)
+            self.vid_cap = cv2.VideoCapture(self.video_path)  # type: ignore
 
         frame_cnt = 0
         img_cnt = 0
@@ -62,32 +62,39 @@ class FrameExtractor:
                 and (frame_cnt < end_frame or end_frame == -1)
             ):
                 img_path = dest_path / f"{img_name}{img_cnt:06}{img_ext}"
-                cv2.imwrite(str(img_path), image)
+                cv2.imwrite(str(img_path), image)  # type: ignore
                 img_cnt += 1
             frame_cnt += 1
         self.vid_cap.release()
-        cv2.destroyAllWindows()
+        cv2.destroyAllWindows()  # type: ignore
 
         list_of_frames = sorted(dest_path.glob("*.jpg"))
 
         num_imgs = len(list_of_frames)
         if num_imgs != img_cnt:
             log.warning(f"Number of frames should have been {img_cnt} but {num_imgs} found.")
-        if num_imgs < (max_frames := end_frame - start_frame - 1):
-            log.warning(f"Number of frames should have been {max_frames} but {num_imgs} found.")
+        if num_imgs < (max_frames := end_frame - start_frame):
+            log.info(f"{num_imgs} frames found of max: {max_frames}.")
 
         return list_of_frames
 
 
-class IOManager:
+class VideoIOManager:
     """
     Class used for loading and saving videos.
     """
 
-    def __init__(self, cfg: VideoConfig, fps: int):
+    def __init__(self, cfg: VideoIOConfig, fps: int):
         self.cfg = cfg
         self.output_fps = fps
         self.frames_dir = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.cfg.delete_frame_dir and self.frames_dir is not None:
+            shutil.rmtree(self.frames_dir)
 
     def get_frames_from_source(self, source: str) -> Tuple[str, List[Path]]:
         if source.startswith("https://") or source.startswith("http://"):
@@ -100,7 +107,7 @@ class IOManager:
             video_path = youtube_dir / yt_video_filename
 
             youtube_video = YouTube(str(video_path))
-            youtube_video.streams.get_highest_resolution().download(
+            youtube_video.streams.get_highest_resolution().download(  # type: ignore
                 output_path=str(youtube_dir), filename=yt_video_filename
             )
         else:
@@ -203,7 +210,3 @@ class IOManager:
             raise Exception("Invalid source path")
 
         return video_name, list_of_frames, additional_data
-
-    def close_video(self):
-        if self.cfg.delete_frame_dir and self.frames_dir is not None:
-            shutil.rmtree(self.frames_dir)

@@ -1,9 +1,7 @@
-from .smpl_wrapper import SMPL
-from .hmr2 import HMR2
-from .discriminator import Discriminator
+from hmr2.models.hmr2 import HMR2
 
-from ..utils.download import cache_url
-from ..configs import CACHE_DIR_4DHUMANS
+from hmr2.utils.download import cache_url
+from hmr2.configs import CACHE_DIR_4DHUMANS
 
 
 def download_models(folder=CACHE_DIR_4DHUMANS):

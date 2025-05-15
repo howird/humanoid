@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import torch
 import numpy as np
 import pickle
@@ -5,6 +6,8 @@ from typing import Optional
 import smplx
 from smplx.lbs import vertices2joints
 from smplx.utils import SMPLOutput
+
+from hmr2.models.heads.smpl_head import SMPLPredParams
 
 
 class SMPL(smplx.SMPLLayer):
@@ -26,11 +29,11 @@ class SMPL(smplx.SMPLLayer):
         self.register_buffer("joint_map", torch.tensor(smpl_to_openpose, dtype=torch.long))
         self.update_hips = update_hips
 
-    def forward(self, *args, **kwargs) -> SMPLOutput:
+    def forward(self, smpl_output: SMPLPredParams, *args, **kwargs) -> SMPLOutput:
         """
         Run forward pass. Same as SMPL and also append an extra set of joints if joint_regressor_extra is specified.
         """
-        smpl_output = super(SMPL, self).forward(*args, **kwargs)
+        smpl_output = super(SMPL, self).forward(pose2rot=False, *args, **asdict(smpl_output), **kwargs)
         joints = smpl_output.joints[:, self.joint_map, :]
         if self.update_hips:
             joints[:, [9, 12]] = (

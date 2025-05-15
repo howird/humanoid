@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Tuple, Dict, Any, List
 
 CACHE_DIR = Path.home() / ".cache"
 
 
 @dataclass
-class VideoConfig:
+class VideoIOConfig:
     output_dir: Path = Path("outputs") / "tracking"
 
     extract_video: bool = True
@@ -35,8 +35,10 @@ class VideoConfig:
 
 @dataclass
 class PHALPConfig:
-    predict: Literal["TPL"] = "TPL"  # Prediction method
-    pose_distance: Literal["smpl"] = "smpl"  # Distance metric for poses
+    # Predictions methods: T: UV image, P: pose, L: location
+    predict: Tuple[Literal["T", "P", "L"], ...] = ("T", "P", "L")
+    # Distance metric for poses
+    pose_distance: Literal["smpl", "joints"] = "smpl"
     distance_type: Literal["EQ_019"] = "EQ_019"
     alpha: float = 0.1
     low_th_c: float = 0.8
@@ -101,49 +103,65 @@ class PostProcessConfig:
 
 @dataclass
 class SMPLConfig:
-    MODEL_PATH: Path = Path("data/smpl/")
+    MODEL_PATH: Path = Path("data/smpl")
     GENDER: str = "neutral"
     MODEL_TYPE: str = "smpl"
     NUM_BODY_JOINTS: int = 23
     JOINT_REGRESSOR_EXTRA: Path = CACHE_DIR / "phalp/3D/SMPL_to_J19.pkl"
     TEXTURE: Path = CACHE_DIR / "phalp/3D/texture.npz"
+    MEAN_PARAMS: Path = CACHE_DIR / "phalp/3D/smpl_mean_params.npz"
 
 
-# Config for HMAR
+@dataclass
+class TransformerDecoderConfig:
+    """Configuration for the transformer decoder."""
+
+    depth: int = 6
+    heads: int = 8
+    mlp_dim: int = 1024
+    dim_head: int = 64
+    dropout: float = 0.0
+    emb_dropout: float = 0.0
+    norm: str = "layer"
+    context_dim: int = 1280
+
+
 @dataclass
 class SMPLHeadConfig:
-    TYPE: str = "basic"
+    TYPE: str = "transformer_decoder"
     POOL: str = "max"
-    SMPL_MEAN_PARAMS: Path = CACHE_DIR / "phalp/3D/smpl_mean_params.npz"
     IN_CHANNELS: int = 2048
+    JOINT_REP: Literal["6d", "aa"] = "6d"
+    TRANSFORMER_INPUT: Literal["zero", "mean_shape"] = "zero"
+    INIT_DECODER_XAVIER: bool = False
+    IEF_ITERS: int = 1
+    TRANSFORMER_DECODER: TransformerDecoderConfig = field(default_factory=TransformerDecoderConfig)
 
 
 @dataclass
 class BackboneConfig:
-    TYPE: str = "resnet"
+    TYPE: str = "vit"
     NUM_LAYERS: int = 50
-    MASK_TYPE: str = "feat"
-
-
-@dataclass
-class TransformerConfig:
-    HEADS: int = 1
-    LAYERS: int = 1
-    BOX_FEATS: int = 6
+    OUT_CHANNELS: int = 2048
+    PRETRAINED_WEIGHTS: Optional[Path] = None
 
 
 @dataclass
 class ModelConfig:
     IMAGE_SIZE: int = 256
+    IMAGE_MEAN: Tuple[float, float, float] = (0.485, 0.456, 0.406)
+    IMAGE_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
     SMPL_HEAD: SMPLHeadConfig = field(default_factory=SMPLHeadConfig)
     BACKBONE: BackboneConfig = field(default_factory=BackboneConfig)
-    TRANSFORMER: TransformerConfig = field(default_factory=TransformerConfig)
     pose_transformer_size: int = 2048
 
 
 @dataclass
 class ExtraConfig:
     FOCAL_LENGTH: int = 5000
+    NUM_LOG_IMAGES: int = 4
+    NUM_LOG_SAMPLES_PER_IMAGE: int = 8
+    PELVIS_IND: int = 39
 
 
 @dataclass
@@ -163,8 +181,11 @@ class BaseConfig:
     detect_shots: bool = False
     video_seq: Optional[str] = None
 
+    # Target aspect ratio for bounding boxes (width, height)
+    expand_bbox_shape: Optional[Tuple[int, int]] = (192, 256)
+
     # Fields
-    video: VideoConfig = field(default_factory=VideoConfig)
+    video: VideoIOConfig = field(default_factory=VideoIOConfig)
     phalp: PHALPConfig = field(default_factory=PHALPConfig)
     pose_predictor: PosePredictorConfig = field(default_factory=PosePredictorConfig)
     ava_config: AVAConfig = field(default_factory=AVAConfig)
@@ -177,3 +198,151 @@ class BaseConfig:
 
     # tmp configs
     hmr_type: str = "hmr2018"
+
+
+@dataclass
+class DatasetTrainConfig:
+    """Configuration for training datasets."""
+
+    H36M_TRAIN_WMASK: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.1})
+    MPII_TRAIN_WMASK: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.1})
+    COCO_TRAIN_2014_WMASK_PRUNED: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.1})
+    COCO_TRAIN_2014_VITPOSE_REPLICATE_PRUNED12: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.1})
+    MPI_INF_TRAIN_PRUNED: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.02})
+    AVA_TRAIN_MIDFRAMES_1FPS_WMASK: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.19})
+    AIC_TRAIN_WMASK: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.19})
+    INSTA_TRAIN_WMASK: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 0.2})
+
+
+@dataclass
+class DatasetValConfig:
+    """Configuration for validation datasets."""
+
+    COCO_VAL: Dict[str, float] = field(default_factory=lambda: {"WEIGHT": 1.0})
+
+
+@dataclass
+class DatasetConfig:
+    """Configuration for dataset processing."""
+
+    SCALE_FACTOR: float = 0.3
+    ROT_FACTOR: int = 30
+    TRANS_FACTOR: float = 0.02
+    COLOR_SCALE: float = 0.2
+    ROT_AUG_RATE: float = 0.6
+    TRANS_AUG_RATE: float = 0.5
+    DO_FLIP: bool = True
+    FLIP_AUG_RATE: float = 0.5
+    EXTREME_CROP_AUG_RATE: float = 0.1
+    EXTREME_CROP_AUG_LEVEL: int = 1
+
+
+@dataclass
+class DatasetsConfig:
+    """Configuration for all datasets."""
+
+    SUPPRESS_KP_CONF_THRESH: float = 0.3
+    FILTER_NUM_KP: int = 4
+    FILTER_NUM_KP_THRESH: float = 0.0
+    FILTER_REPROJ_THRESH: int = 31000
+    SUPPRESS_BETAS_THRESH: float = 3.0
+    SUPPRESS_BAD_POSES: bool = True
+    POSES_BETAS_SIMULTANEOUS: bool = True
+    FILTER_NO_POSES: bool = False
+    TRAIN: DatasetTrainConfig = field(default_factory=DatasetTrainConfig)
+    VAL: DatasetValConfig = field(default_factory=DatasetValConfig)
+    MOCAP: str = "CMU-MOCAP"
+    CONFIG: DatasetConfig = field(default_factory=DatasetConfig)
+    BETAS_REG: bool = True
+
+
+@dataclass
+class LossWeightsConfig:
+    """Configuration for loss weights."""
+
+    KEYPOINTS_3D: float = 0.05
+    KEYPOINTS_2D: float = 0.01
+    GLOBAL_ORIENT: float = 0.001
+    BODY_POSE: float = 0.001
+    BETAS: float = 0.0005
+    ADVERSARIAL: float = 0.0005
+
+
+@dataclass
+class TrainerConfig:
+    """Configuration for the trainer."""
+
+    _target_: str = "pytorch_lightning.Trainer"
+    default_root_dir: str = "${paths.output_dir}"
+    accelerator: str = "gpu"
+    devices: int = 8
+    deterministic: bool = False
+    num_sanity_val_steps: int = 0
+    log_every_n_steps: int = "${GENERAL.LOG_STEPS}"
+    val_check_interval: int = "${GENERAL.VAL_STEPS}"
+    precision: int = 16
+    max_steps: int = "${GENERAL.TOTAL_STEPS}"
+    move_metrics_to_cpu: bool = True
+    limit_val_batches: int = 1
+    track_grad_norm: int = -1
+    strategy: str = "ddp"
+    num_nodes: int = 1
+    sync_batchnorm: bool = True
+
+
+@dataclass
+class PathsConfig:
+    """Configuration for paths."""
+
+    root_dir: str = "${oc.env:PROJECT_ROOT}"
+    data_dir: str = "${paths.root_dir}/data/"
+    log_dir: str = "/fsx/shubham/code/hmr2023/logs_hydra/"
+    output_dir: str = "${hydra:runtime.output_dir}"
+    work_dir: str = "${hydra:runtime.cwd}"
+
+
+@dataclass
+class GeneralConfig:
+    """Configuration for general training parameters."""
+
+    TOTAL_STEPS: int = 1000000
+    LOG_STEPS: int = 1000
+    VAL_STEPS: int = 1000
+    CHECKPOINT_STEPS: int = 10000
+    CHECKPOINT_SAVE_TOP_K: int = 1
+    NUM_WORKERS: int = 6
+    PREFETCH_FACTOR: int = 2
+
+
+@dataclass
+class TrainingConfig:
+    LR: float = 1.0e-5
+    WEIGHT_DECAY: float = 0.0001
+    BATCH_SIZE: int = 48
+    LOSS_REDUCTION: str = "mean"
+    NUM_TRAIN_SAMPLES: int = 2
+    NUM_TEST_SAMPLES: int = 64
+    POSE_2D_NOISE_RATIO: float = 0.01
+    SMPL_PARAM_NOISE_RATIO: float = 0.005
+
+
+@dataclass
+class TrainConfig(BaseConfig):
+    """Configuration for training the model."""
+
+    task_name: str = "train"
+    tags: List[str] = field(default_factory=lambda: ["dev"])
+    train: bool = True
+    test: bool = False
+    ckpt_path: Optional[str] = None
+    seed: Optional[int] = None
+
+    # Nested configurations
+    TRAINING: TrainingConfig = field(default_factory=TrainingConfig)
+    DATASETS: DatasetsConfig = field(default_factory=DatasetsConfig)
+    trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    paths: PathsConfig = field(default_factory=PathsConfig)
+    GENERAL: GeneralConfig = field(default_factory=GeneralConfig)
+    LOSS_WEIGHTS: LossWeightsConfig = field(default_factory=LossWeightsConfig)
+
+    exp_name: str = "hmr2"
