@@ -7,13 +7,13 @@ from typing import Optional
 import pandas as pd
 import torch
 from filelock import FileLock
-from hmr2.configs import dataset_eval_config
-from hmr2.datasets import create_dataset
-from hmr2.utils import Evaluator, recursive_to
+from humanoid_vision.configs import dataset_eval_config
+from humanoid_vision.datasets import create_dataset
+from humanoid_vision.utils import Evaluator, recursive_to
 from tqdm import tqdm
 
-from hmr2.configs import CACHE_DIR_4DHUMANS
-from hmr2.models import HMR2, download_models, load_hmr2, DEFAULT_CHECKPOINT
+from humanoid_vision.configs import CACHE_DIR_4DHUMANS
+from humanoid_vision.models import HMR2, download_models, load_hmr2, DEFAULT_CHECKPOINT
 
 
 def main():

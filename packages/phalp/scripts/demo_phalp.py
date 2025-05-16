@@ -6,9 +6,9 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig
 
-from phalp.configs.base import FullConfig
-from phalp.trackers.PHALP import PHALP
-from phalp.utils import get_pylogger
+from humanoid_vision.configs.base import FullConfig
+from humanoid_vision.trackers.PHALP import PHALP
+from humanoid_vision.utils.pylogger_phalp import get_pylogger
 
 warnings.filterwarnings("ignore")
 log = get_pylogger(__name__)

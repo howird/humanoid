@@ -7,33 +7,32 @@ authors = [
 requires-python = ">=3.8,<3.9"
 version = "0.1.0"
 dependencies = [
-    "puffer-phc",
-    "isaacgym",
     "gymtorch",
-    "hmr2", # mesh reconstruction
-    "phalp", # tracking
+    "humanoid-vision",
+    "isaacgym",
+    "puffer-phc",
 
-    "wandb>=0.16.6,<0.17",
-    "tyro>=0.8.14,<0.9",
-    "polars>=1.5.0,<2",
-    "joblib>=1.4.2,<2",
     "debugpy>=1.8.5,<2",
+    "joblib>=1.4.2,<2",
+    "polars>=1.5.0,<2",
+    "tyro>=0.8.14,<0.9",
+    "wandb>=0.16.6,<0.17",
 
+    "carbs @ git+https://github.com/PufferAI/carbs.git",    
     "pufferlib @ git+https://github.com/kywch/PufferLib.git",
     "smpl_sim @ git+https://github.com/kywch/SMPLSim.git",
-    "carbs @ git+https://github.com/PufferAI/carbs.git",    
 ]
 
 [tool.uv.sources]
-puffer-phc = { workspace = true }
-isaacgym = { workspace = true }
-gymtorch = { workspace = true }
-hmr2 = { workspace = true }
-phalp = { workspace = true }
 chumpy = { git = "https://github.com/howird/chumpy" }
+gymtorch = { workspace = true }
+humanoid-vision = { workspace = true }
+isaacgym = { workspace = true }
+puffer-phc = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
+exclude = ["packages/phalp", "packages/hmr2"]
 
 # [build-system]
 # requires = ["hatchling"]

@@ -225,9 +225,9 @@ class HumanoidPHC:
         # Check if the body ids are consistent between humanoid_asset and body_names (SMPL_MUJOCO_NAMES)
         for body_id, body_name in enumerate(BODY_NAMES):
             body_id_asset = self.gym.find_asset_rigid_body_index(self.humanoid_asset, body_name)
-            assert body_id == body_id_asset, (
-                f"Body id {body_id} does not match index {body_id_asset} for body {body_name}"
-            )
+            assert (
+                body_id == body_id_asset
+            ), f"Body id {body_id} does not match index {body_id_asset} for body {body_name}"
 
     def _create_force_sensors(self, sensor_joint_names):
         sensor_pose = gymapi.Transform()  # type: ignore

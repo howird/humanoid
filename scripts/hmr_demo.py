@@ -7,11 +7,11 @@ import numpy as np
 
 from puffer_phc.config import DebugConfig
 
-from hmr2.configs import CACHE_DIR_4DHUMANS
-from hmr2.models import HMR2, download_models, load_hmr2, DEFAULT_CHECKPOINT
-from hmr2.utils import recursive_to
-from hmr2.datasets.vitdet_dataset import ViTDetDataset, DEFAULT_MEAN, DEFAULT_STD
-from hmr2.utils.renderer import Renderer, cam_crop_to_full
+from humanoid_vision.configs import CACHE_DIR_4DHUMANS
+from humanoid_vision.models import HMR2, download_models, load_hmr2, DEFAULT_CHECKPOINT
+from humanoid_vision.utils.misc import recursive_to
+from humanoid_vision.datasets.vitdet_dataset import ViTDetDataset, DEFAULT_MEAN, DEFAULT_STD
+from humanoid_vision.utils.renderer import Renderer, cam_crop_to_full
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
@@ -64,11 +64,11 @@ def main():
     model.eval()
 
     # Load detector
-    from hmr2.utils.utils_detectron2 import DefaultPredictor_Lazy
+    from humanoid_vision.utils.utils_detectron2 import DefaultPredictor_Lazy
 
     if args.detector == "vitdet":
         from detectron2.config import LazyConfig
-        import hmr2
+        import humanoid_vision
 
         cfg_path = Path(hmr2.__file__).parent / "configs" / "cascade_mask_rcnn_vitdet_h_75ep.py"
         detectron2_cfg = LazyConfig.load(str(cfg_path))

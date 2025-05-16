@@ -1,63 +1,39 @@
-import warnings
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Tuple
-
-import os
-import hydra
+from dataclasses import asdict
 import torch
 import numpy as np
-from hydra.core.config_store import ConfigStore
-from omegaconf import DictConfig
 
-from humanoid_vision.configs.base import FullConfig
 from humanoid_vision.models.hmar.hmr import HMR2018Predictor
-from humanoid_vision.trackers.PHALP import PHALP
 from humanoid_vision.utils.pylogger_phalp import get_pylogger
-from humanoid_vision.configs.base import CACHE_DIR
+from humanoid_vision.configs.base import CACHE_DIR, BaseConfig
+from humanoid_vision.common.hmr_output import HMROutput
+from humanoid_vision.common.hmar_output import HMAROutput
 
-from humanoid_vision.datasets.utils import expand_bbox_to_aspect_ratio
-
-warnings.filterwarnings("ignore")
+from humanoid_vision.models import download_models
+from humanoid_vision.models.hmr2 import HMR2
 
 log = get_pylogger(__name__)
 
 
-class HMR2Predictor(HMR2018Predictor):
-    def __init__(self, cfg) -> None:
-        super().__init__(cfg)
-        # Setup our new model
-        from humanoid_vision.models import download_models, load_hmr2
+class HMR2023TextureSampler(HMR2018Predictor):
+    """HMR2023 model with texture sampling capabilities."""
 
-        # Download and load checkpoints
+    def __init__(self, cfg: BaseConfig) -> None:
+        super().__init__(cfg)
         download_models()
-        model, _ = load_hmr2()
 
-        self.model = model
+        self.model = HMR2.load_from_checkpoint(
+            CACHE_DIR / "4DHumans/logs/train/multiruns/hmr2/0/checkpoints/epoch=35-step=1000000.ckpt",
+            strict=False,
+            cfg=cfg,
+        )
         self.model.eval()
-
-    def forward(self, x):
-        hmar_out = self.hmar_old(x)
-        batch = {
-            "img": x[:, :3, :, :],
-            "mask": (x[:, 3, :, :]).clip(0, 1),
-        }
-        model_out = self.model(batch)
-        out = hmar_out | {
-            "pose_smpl": model_out["pred_smpl_params"],
-            "pred_cam": model_out["pred_cam"],
-        }
-        return out
-
-
-class HMR2023TextureSampler(HMR2Predictor):
-    def __init__(self, cfg) -> None:
-        super().__init__(cfg)
 
         # Model's all set up. Now, load tex_bmap and tex_fmap
         # Texture map atlas
-        bmap = np.load(os.path.join(CACHE_DIR, "phalp/3D/bmap_256.npy"))
-        fmap = np.load(os.path.join(CACHE_DIR, "phalp/3D/fmap_256.npy"))
+        bmap_path = CACHE_DIR / "phalp/3D/bmap_256.npy"
+        fmap_path = CACHE_DIR / "phalp/3D/fmap_256.npy"
+        bmap = np.load(bmap_path)
+        fmap = np.load(fmap_path)
         self.register_buffer("tex_bmap", torch.tensor(bmap, dtype=torch.float))
         self.register_buffer("tex_fmap", torch.tensor(fmap, dtype=torch.long))
 
@@ -75,14 +51,13 @@ class HMR2023TextureSampler(HMR2Predictor):
             anti_aliasing=False,
         )
 
-    def forward(self, x):
+    def forward(self, x) -> HMAROutput:
+        # x: torch.Tensor of shape (num_valid_persons, C+1=4, H=256, W=256)
         batch = {
             "img": x[:, :3, :, :],
             "mask": (x[:, 3, :, :]).clip(0, 1),
         }
-        model_out = self.model(batch)
-
-        # from humanoid_vision.models.prohmr_texture import unproject_uvmap_to_mesh
+        model_out: HMROutput = self.model(batch)
 
         def unproject_uvmap_to_mesh(bmap, fmap, verts, faces):
             # bmap:  256,256,3
@@ -102,13 +77,13 @@ class HMR2023TextureSampler(HMR2Predictor):
 
             return map_verts, valid_mask
 
-        pred_verts = model_out["pred_vertices"] + model_out["pred_cam_t"].unsqueeze(1)
+        pred_verts = model_out.pred_vertices + model_out.pred_cam_t.unsqueeze(1)
         device = pred_verts.device
         face_tensor = torch.tensor(self.smpl.faces.astype(np.int64), dtype=torch.long, device=device)
         map_verts, valid_mask = unproject_uvmap_to_mesh(self.tex_bmap, self.tex_fmap, pred_verts, face_tensor)  # B,N,3
 
         # Project map_verts to image using K,R,t
-        # map_verts_view = einsum('bij,bnj->bni', R, map_verts) + t # R=I t=0
+        # map_verts_view = einsum('bij,bnj->bni', R, map_verts) # R=I t=0
         focal = self.focal_length / (self.img_size / 2)
         map_verts_proj = focal * map_verts[:, :, :2] / map_verts[:, :, 2:3]  # B,N,2
         map_verts_depth = map_verts[:, :, 2]  # B,N
@@ -146,66 +121,4 @@ class HMR2023TextureSampler(HMR2Predictor):
         uv_image = torch.zeros((batch["img"].shape[0], 4, 256, 256), dtype=torch.float, device=device)
         uv_image[:, :, valid_mask] = img_rgba_at_proj
 
-        out = {
-            "uv_image": uv_image,
-            "uv_vector": self.hmar_old.process_uv_image(uv_image),
-            "pose_smpl": model_out["pred_smpl_params"],
-            "pred_cam": model_out["pred_cam"],
-        }
-        return out
-
-
-class HMR2_4dhuman(PHALP):
-    def __init__(self, cfg):
-        super().__init__(cfg)
-
-    def setup_hmr(self):
-        self.HMAR = HMR2023TextureSampler(self.cfg)
-
-    def get_detections(self, image, frame_name, t_, additional_data=None, measurments=None):
-        (
-            pred_bbox,
-            pred_bbox,
-            pred_masks,
-            pred_scores,
-            pred_classes,
-            ground_truth_track_id,
-            ground_truth_annotations,
-        ) = super().get_detections(image, frame_name, t_, additional_data, measurments)
-
-        # Pad bounding boxes
-        pred_bbox_padded = expand_bbox_to_aspect_ratio(pred_bbox, self.cfg.expand_bbox_shape)
-
-        return (
-            pred_bbox,
-            pred_bbox_padded,
-            pred_masks,
-            pred_scores,
-            pred_classes,
-            ground_truth_track_id,
-            ground_truth_annotations,
-        )
-
-
-@dataclass
-class Human4DConfig(FullConfig):
-    # override defaults if needed
-    expand_bbox_shape: Optional[Tuple[int]] = (192, 256)
-    pass
-
-
-cs = ConfigStore.instance()
-cs.store(name="config", node=Human4DConfig)
-
-
-@hydra.main(version_base="1.2", config_name="config")
-def main(cfg: DictConfig) -> Optional[float]:
-    """Main function for running the PHALP tracker."""
-
-    phalp_tracker = HMR2_4dhuman(cfg)
-
-    phalp_tracker.track()
-
-
-if __name__ == "__main__":
-    main()
+        return HMAROutput(uv_image=uv_image, uv_vector=self.hmar_old.process_uv_image(uv_image), **asdict(model_out))

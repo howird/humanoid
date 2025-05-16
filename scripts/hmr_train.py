@@ -19,11 +19,11 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.plugins.environments import SLURMEnvironment
 
 from yacs.config import CfgNode
-from hmr2.configs import dataset_config
-from hmr2.datasets import HMR2DataModule
-from hmr2.models.hmr2 import HMR2
-from hmr2.utils.pylogger import get_pylogger
-from hmr2.utils.misc import task_wrapper, log_hyperparameters
+from humanoid_vision.configs import dataset_config
+from humanoid_vision.datasets import HMR2DataModule
+from humanoid_vision.models.hmr2 import HMR2
+from humanoid_vision.utils.pylogger import get_pylogger
+from humanoid_vision.utils.misc import task_wrapper, log_hyperparameters
 
 # HACK reset the signal handling so the lightning is free to set it
 # Based on https://github.com/facebookincubator/submitit/issues/1709#issuecomment-1246758283

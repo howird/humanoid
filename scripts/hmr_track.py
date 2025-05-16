@@ -12,11 +12,11 @@ import tyro
 
 from puffer_phc.config import DebugConfig
 
-from phalp.configs.base import BaseConfig
-from phalp.utils.video_io_manager import VideoIOManager
-from phalp.models.hmar.hmr2 import HMR2023TextureSampler
-from phalp.trackers.phalp import PHALP
-from phalp.trackers import setup_predictor, setup_detectron2
+from humanoid_vision.configs.base import BaseConfig
+from humanoid_vision.utils.video_io_manager import VideoIOManager
+from humanoid_vision.models.hmar.hmr2 import HMR2023TextureSampler
+from humanoid_vision.trackers.phalp import PHALP
+from humanoid_vision.trackers import setup_predictor, setup_detectron2
 
 
 @dataclass
