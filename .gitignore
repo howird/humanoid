@@ -8,6 +8,8 @@ result*/
 wandb/
 experiments/
 output/
+outputs/
+hmr2_training_data*
 packages/isaacgym/*
 !packages/isaacgym/pyproject.toml
 

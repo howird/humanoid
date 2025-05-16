@@ -138,7 +138,7 @@ def evaluate(components: TrainComponents, info: TrainInfo) -> Tuple[StatsData, D
             else:
                 info.global_step += int(sum(mask))
 
-            obses = torch.as_tensor(obses)
+            obses = torch.as_tensor(obses)  # TODO(howird): do we even need this? they already are tensors
             obses_device = obses.to(train_cfg.device)
             rewards = torch.as_tensor(rewards)
             dones = torch.as_tensor(dones)

@@ -34,10 +34,10 @@ def compute_humanoid_observations_smpl_max(
     has_limb_weight_params,
 ):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, bool, bool, bool, bool, bool) -> Tensor
-    root_pos = body_pos[:, 0, :]
-    root_rot = body_rot[:, 0, :]
+    root_pos = body_pos[:, 0, :]  # (num_envs, 3)
+    root_rot = body_rot[:, 0, :]  # (num_envs, 4)
 
-    root_h = root_pos[:, 2:3]
+    root_h = root_pos[:, 2:3]  # (num_envs, 1) get z coords of pelvis
     if not upright:
         root_rot = remove_base_rot(root_rot)
     heading_rot_inv = calc_heading_quat_inv(root_rot)

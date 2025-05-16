@@ -7,6 +7,20 @@ from puffer_phc.envs.state_init import StateInit
 
 
 @dataclass
+class DebugConfig:
+    enable: bool = False
+    port: int = 5678
+
+    def __call__(self):
+        if self.enable:
+            import debugpy
+
+            debugpy.listen(self.port)
+            print(f"Waiting for debugger attach to port: {self.port}")
+            debugpy.wait_for_client()
+
+
+@dataclass
 class DeviceConfig:
     device_type: Literal["cpu", "cuda"] = "cuda"
     device_id: int = 0
