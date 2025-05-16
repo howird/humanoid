@@ -5,9 +5,11 @@ import numpy as np
 from phalp.models.hmar.hmr import HMR2018Predictor
 from phalp.utils import get_pylogger
 from phalp.configs.base import CACHE_DIR, BaseConfig
+from phalp.common.hmr_output import HMROutput
+from phalp.common.hmar_output import HMAROutput
 
 from hmr2.models import download_models
-from hmr2.models.hmr2 import HMR2, HMR2Output
+from hmr2.models.hmr2 import HMR2
 
 log = get_pylogger(__name__)
 
@@ -49,13 +51,13 @@ class HMR2023TextureSampler(HMR2018Predictor):
             anti_aliasing=False,
         )
 
-    def forward(self, x):
+    def forward(self, x) -> HMAROutput:
         # x: torch.Tensor of shape (num_valid_persons, C+1=4, H=256, W=256)
         batch = {
             "img": x[:, :3, :, :],
             "mask": (x[:, 3, :, :]).clip(0, 1),
         }
-        model_out: HMR2Output = self.model(batch)
+        model_out: HMROutput = self.model(batch)
 
         def unproject_uvmap_to_mesh(bmap, fmap, verts, faces):
             # bmap:  256,256,3
@@ -119,9 +121,4 @@ class HMR2023TextureSampler(HMR2018Predictor):
         uv_image = torch.zeros((batch["img"].shape[0], 4, 256, 256), dtype=torch.float, device=device)
         uv_image[:, :, valid_mask] = img_rgba_at_proj
 
-        out = {
-            "uv_image": uv_image,
-            "uv_vector": self.hmar_old.process_uv_image(uv_image),
-        }
-        out.update(asdict(model_out))
-        return out
+        return HMAROutput(uv_image=uv_image, uv_vector=self.hmar_old.process_uv_image(uv_image), **asdict(model_out))

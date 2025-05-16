@@ -1,5 +1,6 @@
 #!/bin/bash
 DATASET_PATH="/home/howard/stathletes-multiview-games"
+MIN_SHOT_NUMBER=000
 
 # Array of game names to process
 GAME_NAMES=(
@@ -48,6 +49,7 @@ if [ $MISSING_DIRS -gt 0 ]; then
 fi
 
 echo "All game directories verified. Starting processing..."
+echo "Processing shots with numbers >= ${MIN_SHOT_NUMBER}"
 
 # Process each game
 for i in "${!GAME_NAMES[@]}"; do
@@ -62,7 +64,13 @@ for i in "${!GAME_NAMES[@]}"; do
     mkdir -p "${OUTPUT_DIR}"
 
     # Find and process all video files in the game directory
+    # Using regex to match shot numbers >= MIN_SHOT_NUMBER
     find "${BASE_DIR}" -type f -name "*.mp4" -path "*/shots_*/*" | \
+    grep -E "shot[0-9]{3}\.mp4$" | \
+    awk -F/ -v min=$MIN_SHOT_NUMBER '{
+        match($NF, /shot([0-9]+)\.mp4/, arr);
+        if (arr[1] >= min) print $0;
+    }' | \
     xargs -I {} python scripts/hmr_track.py "{}" --video.output_dir "${OUTPUT_DIR}"
 done
 

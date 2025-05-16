@@ -1,33 +1,32 @@
-from typing import List, Optional
 import warnings
-from pathlib import Path
 
 warnings.filterwarnings("ignore")
+
+from pathlib import Path
+from typing import List
 
 import cv2
 import joblib
 import numpy as np
 import torch
 import torch.nn as nn
-from scenedetect import AdaptiveDetector, detect
-from sklearn.linear_model import Ridge
 
-from phalp.configs.base import CACHE_DIR, BaseConfig
-from phalp.deep_sort.nn_matching import NearestNeighborDistanceMetric
-from phalp.deep_sort.detection import Detection
+from scenedetect import AdaptiveDetector, detect
+
+from hmr2.datasets.utils import expand_bbox_to_aspect_ratio
+
+from phalp.configs.base import BaseConfig
 from phalp.deep_sort.tracker import Tracker
 from phalp.models.predictor.pose_transformer_v2 import Pose_transformer_v2
-from phalp.models.hmar.hmr2 import HMR2023TextureSampler
+from phalp.models.hmar.hmr2 import HMAROutput, HMR2023TextureSampler
+from phalp.common.detection import Detection
 
 from phalp.visualize.postprocessor import Postprocessor
 from phalp.visualize.visualizer import Visualizer
 
-from hmr2.datasets.utils import expand_bbox_to_aspect_ratio
-
-from phalp.utils.utils import get_prediction_interval, progress_bar, smpl_to_pose_camera_vector
+from phalp.utils.utils import progress_bar, smpl_to_pose_camera_vector, cached_download_from_drive
 from phalp.utils.utils_detectron2 import DefaultPredictor_Lazy
 from phalp.utils.video_writer import VideoWriter
-from phalp.utils.utils_download import cache_url
 from phalp.utils.bbox import get_cropped_image
 from phalp.utils import get_pylogger
 
@@ -47,29 +46,27 @@ class PHALP(nn.Module):
         self.cfg = cfg
         self.device = torch.device(self.cfg.device)
 
-        # download wights and configs from Google Drive
-        self.cached_download_from_drive()
+        cached_download_from_drive()
 
         # Store models
         self.HMAR = hmr_model
         self.pose_predictor = pose_predictor
         self.detector = detector
+
         self.visualizer = Visualizer(self.cfg, self.HMAR)
+        self.tracker = Tracker(
+            self.cfg,
+            self.HMAR,
+            self.pose_predictor,
+            max_age=self.cfg.phalp.max_age_track,
+            n_init=self.cfg.phalp.n_init,
+            dims=(4096, 4096, 99),
+        )
 
         # by default this will not be initialized
         # TODO(howird): add a flag to enable it
         if False:
             self.postprocessor = Postprocessor(self.cfg, self)
-
-        metric = NearestNeighborDistanceMetric(self.cfg, self.cfg.phalp.hungarian_th, self.cfg.phalp.past_lookback)
-        self.tracker = Tracker(
-            self.cfg,
-            metric,
-            max_age=self.cfg.phalp.max_age_track,
-            n_init=self.cfg.phalp.n_init,
-            phalp_tracker=self,
-            dims=[4096, 4096, 99],
-        )
 
         self.to(self.device)
         self.train() if (self.cfg.train) else self.eval()
@@ -213,10 +210,10 @@ class PHALP(nn.Module):
                     d_ = self.cfg.phalp.n_init + 1 if (t + 1 == len(list_of_frames)) else 1
                     for t_ in range(t, t + d_):
                         frame_key = list_of_frames[t_ - self.cfg.phalp.n_init]
-                        rendered_, f_size = self.visualizer.render_video(final_visuals_dic[frame_key])
+                        rendered, f_size = self.visualizer.render_video(final_visuals_dic[frame_key])
 
                         # save the rendered frame
-                        vwriter.save_video(video_path, rendered_, f_size, t=t_ - self.cfg.phalp.n_init)
+                        vwriter.save_video(video_path, rendered, f_size, t=t_ - self.cfg.phalp.n_init)
 
                         # delete the frame after rendering it
                         del final_visuals_dic[frame_key]["frame"]
@@ -279,7 +276,7 @@ class PHALP(nn.Module):
         measurments,
         gt,
         ann,
-    ):
+    ) -> List[Detection]:
         num_detected_persons = len(score)
         if num_detected_persons == 0:
             log.warning(f"No people found in {frame_name}.")
@@ -292,6 +289,7 @@ class PHALP(nn.Module):
         scale_list = []
         rles_list = []
         selected_ids = []
+
         for p_ in range(num_detected_persons):
             if bbox[p_][2] - bbox[p_][0] < self.cfg.phalp.small_w or bbox[p_][3] - bbox[p_][1] < self.cfg.phalp.small_h:
                 continue
@@ -312,16 +310,15 @@ class PHALP(nn.Module):
         masked_image_list = torch.stack(masked_image_list, dim=0)
 
         with torch.no_grad():
-            extra_args = {}
-            hmar_out = self.HMAR(masked_image_list.cuda(), **extra_args)
-            uv_vector = hmar_out["uv_vector"]
+            hmar_out: HMAROutput = self.HMAR(masked_image_list.cuda())
+            uv_vector = hmar_out.uv_vector
             appe_embedding = self.HMAR.autoencoder_hmar(uv_vector, en=True)
             appe_embedding = appe_embedding.view(appe_embedding.shape[0], -1)
 
             pred_smpl_params, pred_joints_2d, pred_joints, pred_cam = self.HMAR.get_3d_parameters(
                 # HACK(howird)
-                dict(body_pose=hmar_out["body_pose"], betas=hmar_out["betas"], global_orient=hmar_out["global_orient"]),
-                hmar_out["pred_cam"],
+                dict(body_pose=hmar_out.body_pose, betas=hmar_out.betas, global_orient=hmar_out.global_orient),
+                hmar_out.pred_cam,
                 center=(np.array(center_list) + np.array([left, top])) * ratio,
                 img_size=self.cfg.render.res,
                 scale=np.max(np.array(scale_list), axis=1, keepdims=True) * ratio,
@@ -365,7 +362,7 @@ class PHALP(nn.Module):
                 "scale": scale_list[i],
                 "smpl": pred_smpl_params[i],
                 "camera": pred_cam_[i].cpu().numpy(),
-                "camera_bbox": hmar_out["pred_cam"][i].cpu().numpy(),
+                "camera_bbox": hmar_out.pred_cam[i].cpu().numpy(),
                 "3d_joints": pred_joints[i].cpu().numpy(),
                 "2d_joints": pred_joints_2d_[i].cpu().numpy(),
                 "size": [img_height, img_width],
@@ -375,131 +372,13 @@ class PHALP(nn.Module):
                 "time": t,
                 "ground_truth": gt[p_],
                 "annotations": ann[p_],
-                "hmar_out_cam": hmar_out["pred_cam"].view(num_valid_persons, -1).cpu().numpy(),
-                "hmar_out_cam_t": hmar_out["pred_cam_t"].view(num_valid_persons, -1).cpu().numpy(),
-                "hmar_out_focal_length": hmar_out["focal_length"].view(num_valid_persons, -1).cpu().numpy(),
+                "hmar_out_cam": hmar_out.pred_cam.view(num_valid_persons, -1).cpu().numpy(),
+                "hmar_out_cam_t": hmar_out.pred_cam_t.view(num_valid_persons, -1).cpu().numpy(),
+                "hmar_out_focal_length": hmar_out.focal_length.view(num_valid_persons, -1).cpu().numpy(),
             }
             detection_data_list.append(Detection(detection_data))
 
         return detection_data_list
-
-    def forward_for_tracking(self, vectors, attibute="A", time=1):
-        if attibute == "P":
-            vectors_pose = vectors[0]
-            vectors_data = vectors[1]
-            vectors_time = vectors[2]
-
-            en_pose = torch.from_numpy(vectors_pose)
-            en_data = torch.from_numpy(vectors_data)
-            en_time = torch.from_numpy(vectors_time)
-
-            if len(en_pose.shape) != 3:
-                en_pose = en_pose.unsqueeze(0)  # (num_valid_persons, 7, pose_dim)
-                en_time = en_time.unsqueeze(0)  # (num_valid_persons, 7)
-                en_data = en_data.unsqueeze(0)  # (num_valid_persons, 7, 6)
-
-            with torch.no_grad():
-                pose_pred = self.pose_predictor.predict_next(en_pose, en_data, en_time, time)
-
-            return pose_pred.cpu()
-
-        if attibute == "L":
-            vectors_loca = vectors[0]
-            vectors_time = vectors[1]
-            vectors_conf = vectors[2]
-
-            en_loca = torch.from_numpy(vectors_loca)
-            en_time = torch.from_numpy(vectors_time)
-            en_conf = torch.from_numpy(vectors_conf)
-            time = torch.from_numpy(time)
-
-            if len(en_loca.shape) != 3:
-                en_loca = en_loca.unsqueeze(0)
-                en_time = en_time.unsqueeze(0)
-            else:
-                en_loca = en_loca.permute(0, 1, 2)
-
-            num_valid_persons = en_loca.size(0)
-            t = en_loca.size(1)
-
-            en_loca_xy = en_loca[:, :, :90]
-            en_loca_xy = en_loca_xy.view(num_valid_persons, t, 45, 2)
-            en_loca_n = en_loca[:, :, 90:]
-            en_loca_n = en_loca_n.view(num_valid_persons, t, 3, 3)
-
-            new_en_loca_n = []
-            for bs in range(num_valid_persons):
-                x0_ = np.array(en_loca_xy[bs, :, 44, 0])
-                y0_ = np.array(en_loca_xy[bs, :, 44, 1])
-                n_ = np.log(np.array(en_loca_n[bs, :, 0, 2]))
-                t = np.array(en_time[bs, :])
-
-                loc_ = torch.diff(en_time[bs, :], dim=0) != 0
-                if self.cfg.phalp.distance_type == "EQ_020" or self.cfg.phalp.distance_type == "EQ_021":
-                    loc_ = 1
-                else:
-                    loc_ = loc_.shape[0] - torch.sum(loc_) + 1
-
-                M = t[:, np.newaxis] ** [0, 1]
-                time_ = 48 if time[bs] > 48 else time[bs]
-
-                clf = Ridge(alpha=5.0)
-                clf.fit(M, n_)
-                n_p = clf.predict(np.array([1, time_ + 1 + t[-1]]).reshape(1, -1))
-                n_p = n_p[0]
-                n_hat = clf.predict(np.hstack((np.ones((t.size, 1)), t.reshape((-1, 1)))))
-                n_pi = get_prediction_interval(n_, n_hat, t, time_ + 1 + t[-1])
-
-                clf = Ridge(alpha=1.2)
-                clf.fit(M, x0_)
-                x_p = clf.predict(np.array([1, time_ + 1 + t[-1]]).reshape(1, -1))
-                x_p = x_p[0]
-                x_p_ = (x_p - 0.5) * np.exp(n_p) / 5000.0 * 256.0
-                x_hat = clf.predict(np.hstack((np.ones((t.size, 1)), t.reshape((-1, 1)))))
-                x_pi = get_prediction_interval(x0_, x_hat, t, time_ + 1 + t[-1])
-
-                clf = Ridge(alpha=2.0)
-                clf.fit(M, y0_)
-                y_p = clf.predict(np.array([1, time_ + 1 + t[-1]]).reshape(1, -1))
-                y_p = y_p[0]
-                y_p_ = (y_p - 0.5) * np.exp(n_p) / 5000.0 * 256.0
-                y_hat = clf.predict(np.hstack((np.ones((t.size, 1)), t.reshape((-1, 1)))))
-                y_pi = get_prediction_interval(y0_, y_hat, t, time_ + 1 + t[-1])
-
-                new_en_loca_n.append([x_p_, y_p_, np.exp(n_p), x_pi / loc_, y_pi / loc_, np.exp(n_pi) / loc_, 1, 1, 0])
-                en_loca_xy[bs, -1, 44, 0] = x_p
-                en_loca_xy[bs, -1, 44, 1] = y_p
-
-            new_en_loca_n = torch.from_numpy(np.array(new_en_loca_n))
-            xt = torch.cat(
-                (
-                    en_loca_xy[:, -1, :, :].view(num_valid_persons, 90),
-                    (new_en_loca_n.float()).view(num_valid_persons, 9),
-                ),
-                1,
-            )
-
-            return xt
-
-    def get_uv_distance(self, t_uv, d_uv):
-        t_uv = torch.from_numpy(t_uv).cuda().float()
-        d_uv = torch.from_numpy(d_uv).cuda().float()
-        d_mask = d_uv[3:, :, :] > 0.5
-        t_mask = t_uv[3:, :, :] > 0.5
-
-        mask_dt = torch.logical_and(d_mask, t_mask)
-        mask_dt = mask_dt.repeat(4, 1, 1)
-        mask_ = torch.logical_not(mask_dt)
-
-        t_uv[mask_] = 0.0
-        d_uv[mask_] = 0.0
-
-        with torch.no_grad():
-            t_emb = self.HMAR.autoencoder_hmar(t_uv.unsqueeze(0), en=True)
-            d_emb = self.HMAR.autoencoder_hmar(d_uv.unsqueeze(0), en=True)
-        t_emb = t_emb.view(-1) / 10**3
-        d_emb = d_emb.view(-1) / 10**3
-        return t_emb.cpu().numpy(), d_emb.cpu().numpy(), torch.sum(mask_dt).cpu().numpy() / 4 / 256 / 256 / 2
 
     def get_list_of_shots(self, video_name, list_of_frames):
         # https://github.com/Breakthrough/PySceneDetect
@@ -540,76 +419,3 @@ class PHALP(nn.Module):
             log.info(f"Detected shot change at frames: {list_of_shots}.")
 
         return list_of_shots
-
-    def cached_download_from_drive(self, additional_urls=None):
-        """Download a file from Google Drive if it doesn't exist yet.
-        :param url: the URL of the file to download
-        :param path: the path to save the file to
-        """
-        # Create necessary directories
-        (CACHE_DIR / "phalp").mkdir(parents=True, exist_ok=True)
-        (CACHE_DIR / "phalp/3D").mkdir(parents=True, exist_ok=True)
-        (CACHE_DIR / "phalp/weights").mkdir(parents=True, exist_ok=True)
-        (CACHE_DIR / "phalp/ava").mkdir(parents=True, exist_ok=True)
-
-        additional_urls = additional_urls if additional_urls is not None else {}
-        download_files = {
-            "head_faces.npy": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/head_faces.npy",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "mean_std.npy": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/mean_std.npy",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "smpl_mean_params.npz": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/smpl_mean_params.npz",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "SMPL_to_J19.pkl": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/SMPL_to_J19.pkl",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "texture.npz": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/3D/texture.npz",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "bmap_256.npy": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/bmap_256.npy",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "fmap_256.npy": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/fmap_256.npy",
-                str(CACHE_DIR / "phalp/3D"),
-            ],
-            "hmar_v2_weights.pth": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/hmar_v2_weights.pth",
-                str(CACHE_DIR / "phalp/weights"),
-            ],
-            "pose_predictor.pth": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/pose_predictor_40006.ckpt",
-                str(CACHE_DIR / "phalp/weights"),
-            ],
-            "pose_predictor.yaml": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/weights/config_40006.yaml",
-                str(CACHE_DIR / "phalp/weights"),
-            ],
-            # data for ava dataset
-            "ava_labels.pkl": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/ava/ava_labels.pkl",
-                str(CACHE_DIR / "phalp/ava"),
-            ],
-            "ava_class_mapping.pkl": [
-                "https://people.eecs.berkeley.edu/~jathushan/projects/phalp/ava/ava_class_mappping.pkl",
-                str(CACHE_DIR / "phalp/ava"),
-            ],
-        }
-        download_files.update(additional_urls)
-
-        for file_name, url in download_files.items():
-            file_path = Path(url[1]) / file_name
-            if not file_path.exists():
-                print(f"Downloading file: {file_name}")
-                # output = gdown.cached_download(url[0], str(file_path), fuzzy=True)
-                output = cache_url(url[0], str(file_path))
-                assert Path(output).exists(), f"{output} does not exist"

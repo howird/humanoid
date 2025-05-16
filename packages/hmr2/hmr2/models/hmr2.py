@@ -1,48 +1,27 @@
-from dataclasses import asdict, dataclass
-from smplx.utils import ModelOutput, SMPLOutput
 import torch
-from torch.optim import lr_scheduler
 import pytorch_lightning as pl
-from typing import Any, Dict, Mapping, Tuple, Optional
 
+from dataclasses import asdict
+from typing import Dict, Tuple
+
+from torch.optim import lr_scheduler
+from smplx.utils import ModelOutput
 from yacs.config import CfgNode
+
 
 from hmr2.utils import SkeletonRenderer, MeshRenderer
 from hmr2.utils.geometry import aa_to_rotmat, perspective_projection
 from hmr2.utils.pylogger import get_pylogger
 from hmr2.models.backbones import create_backbone
-from hmr2.models.heads.smpl_head import SMPLPredParams, SMPLTransformerDecoderHead
+from hmr2.models.heads.smpl_head import SMPLTransformerDecoderHead
 from hmr2.models.discriminator import Discriminator
 from hmr2.models.losses import Keypoint3DLoss, Keypoint2DLoss, ParameterLoss
 from hmr2.models.smpl_wrapper import SMPL
 
+from phalp.common.hmr_output import HMROutput
+from phalp.common.smpl_output import HMRSMPLOutput
+
 log = get_pylogger(__name__)
-
-
-@dataclass
-class HMR2Output(SMPLPredParams):
-    """Output of the HMR2 model.
-
-    Inherits from SMPLPredParams and adds additional fields for camera parameters,
-    keypoints, and vertices.
-
-    Attributes:
-        pred_cam: Camera parameters of shape (B, 3)
-        pred_cam_t: Camera translation of shape (B, 3)
-        focal_length: Focal length of shape (B, 2)
-        pred_keypoints_3d: 3D keypoints of shape (B, N, 3)
-        pred_keypoints_2d: 2D keypoints of shape (B, N, 2)
-        pred_vertices: Mesh vertices of shape (B, V, 3)
-        losses: Optional dictionary of losses
-    """
-
-    pred_cam: torch.Tensor
-    pred_cam_t: torch.Tensor
-    focal_length: torch.Tensor
-    pred_keypoints_3d: torch.Tensor
-    pred_keypoints_2d: torch.Tensor
-    pred_vertices: torch.Tensor
-    losses: Optional[Dict[str, torch.Tensor]] = None
 
 
 class HMR2(pl.LightningModule):
@@ -119,7 +98,7 @@ class HMR2(pl.LightningModule):
 
         return optimizer, optimizer_disc
 
-    def forward_step(self, batch: Dict, train: bool = False) -> HMR2Output:
+    def forward_step(self, batch: Dict, train: bool = False) -> HMROutput:
         """
         Run a forward step of the network
         Args:
@@ -128,7 +107,7 @@ class HMR2(pl.LightningModule):
                 - mask: Optional segmentation mask of shape (B, H, W)
             train (bool): Flag indicating whether it is training or validation mode
         Returns:
-            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
+            HMROutput: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
 
         # Use RGB image as input
@@ -139,7 +118,7 @@ class HMR2(pl.LightningModule):
         # if using ViT backbone, we need to use a different aspect ratio
         conditioning_feats = self.backbone(x[:, :, :, 32:-32])  # (BS, 3, 256, 192) -> (BS, 1280, 16, 12)
 
-        pred_smpl_params: SMPLPredParams
+        pred_smpl_params: HMRSMPLOutput
         pred_smpl_params, pred_cam, _ = self.smpl_head(conditioning_feats)
 
         # Compute camera translation
@@ -169,7 +148,7 @@ class HMR2(pl.LightningModule):
             pred_keypoints_3d, translation=pred_cam_t, focal_length=focal_length / self.cfg.MODEL.IMAGE_SIZE
         )
 
-        return HMR2Output(
+        return HMROutput(
             global_orient=pred_smpl_params.global_orient,
             body_pose=pred_smpl_params.body_pose,
             betas=pred_smpl_params.betas,
@@ -181,7 +160,7 @@ class HMR2(pl.LightningModule):
             pred_vertices=pred_vertices,
         )
 
-    def compute_loss(self, batch: Dict, output: HMR2Output, train: bool = True) -> torch.Tensor:
+    def compute_loss(self, batch: Dict, output: HMROutput, train: bool = True) -> torch.Tensor:
         """
         Compute losses given the input batch and the regression output
         Args:
@@ -193,7 +172,7 @@ class HMR2(pl.LightningModule):
                 - smpl_params: Dictionary of SMPL parameters
                 - has_smpl_params: Dictionary of flags indicating valid SMPL parameters
                 - smpl_params_is_axis_angle: Dictionary of flags indicating axis-angle representation
-            output (HMR2Output): Output from forward step
+            output (HMROutput): Output from forward step
             train (bool): Flag indicating whether it is training or validation mode
         Returns:
             torch.Tensor : Total loss for current batch
@@ -253,7 +232,7 @@ class HMR2(pl.LightningModule):
     # Tensoroboard logging should run from first rank only
     @pl.utilities.rank_zero.rank_zero_only
     def tensorboard_logging(
-        self, batch: Dict, output: HMR2Output, step_count: int, train: bool = True, write_to_summary_writer: bool = True
+        self, batch: Dict, output: HMROutput, step_count: int, train: bool = True, write_to_summary_writer: bool = True
     ) -> None:
         """
         Log results to Tensorboard
@@ -263,7 +242,7 @@ class HMR2(pl.LightningModule):
                 - mask: Optional segmentation mask of shape (B, H, W)
                 - keypoints_2d: 2D keypoints of shape (B, N, 2)
                 - keypoints_3d: 3D keypoints of shape (B, N, 3)
-            output (HMR2Output): Output from forward step
+            output (HMROutput): Output from forward step
             step_count (int): Global training step count
             train (bool): Flag indicating whether it is training or validation mode
         """
@@ -300,11 +279,11 @@ class HMR2(pl.LightningModule):
             focal_length=focal_length[:num_images].cpu().numpy(),
         )
         if write_to_summary_writer:
-            summary_writer.add_image("%s/predictions" % mode, predictions, step_count)
+            summary_writer.add_image(f"{mode}/predictions", predictions, step_count)
 
         return predictions
 
-    def forward(self, batch: Dict) -> HMR2Output:
+    def forward(self, batch: Dict) -> HMROutput:
         """
         Run a forward step of the network in val mode
         Args:
@@ -312,7 +291,7 @@ class HMR2(pl.LightningModule):
                 - img: Input RGB image of shape (B, 3, H, W)
                 - mask: Optional segmentation mask of shape (B, H, W)
         Returns:
-            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
+            HMROutput: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
         return self.forward_step(batch, train=False)
 
@@ -344,7 +323,7 @@ class HMR2(pl.LightningModule):
         optimizer.step()
         return loss_disc.detach()
 
-    def training_step(self, joint_batch: Dict, batch_idx: int) -> HMR2Output:
+    def training_step(self, joint_batch: Dict, batch_idx: int) -> HMROutput:
         """
         Run a full training step
         Args:
@@ -360,7 +339,7 @@ class HMR2(pl.LightningModule):
                 - mocap: Dictionary with mocap data for adversarial training
             batch_idx (int): Unused.
         Returns:
-            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
+            HMROutput: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
         batch = joint_batch["img"]
         mocap_batch = joint_batch["mocap"]
@@ -410,7 +389,7 @@ class HMR2(pl.LightningModule):
 
         return output
 
-    def validation_step(self, batch: Dict, batch_idx: int, dataloader_idx=0) -> HMR2Output:
+    def validation_step(self, batch: Dict, batch_idx: int, dataloader_idx=0) -> HMROutput:
         """
         Run a validation step and log to Tensorboard
         Args:
@@ -424,7 +403,7 @@ class HMR2(pl.LightningModule):
                 - smpl_params_is_axis_angle: Dictionary of flags indicating axis-angle representation
             batch_idx (int): Unused.
         Returns:
-            HMR2Output: Output containing SMPL parameters, camera parameters, keypoints and vertices
+            HMROutput: Output containing SMPL parameters, camera parameters, keypoints and vertices
         """
         output = self.forward_step(batch, train=False)
         loss = self.compute_loss(batch, output, train=False)

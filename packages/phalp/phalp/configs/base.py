@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Literal, Tuple, Dict, Any, List
+from typing import Optional, Literal, Tuple, Dict, List
 
 CACHE_DIR = Path.home() / ".cache"
 
@@ -49,6 +49,7 @@ class PHALPConfig:
     encode_type: str = "4c"
     past_lookback: int = 1
     detector: str = "vitdet"
+
     shot: int = 0
     start_frame: int = -1
     end_frame: int = 10

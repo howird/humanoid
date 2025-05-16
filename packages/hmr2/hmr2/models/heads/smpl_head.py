@@ -1,5 +1,3 @@
-from dataclasses import asdict, dataclass
-from phalp.configs.base import BaseConfig
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,24 +5,13 @@ import numpy as np
 import einops
 
 from typing import Tuple, Dict
+from dataclasses import asdict
+
+from phalp.configs.base import BaseConfig
+from phalp.common.smpl_output import HMRSMPLOutput
 
 from hmr2.utils.geometry import rot6d_to_rotmat, aa_to_rotmat
 from hmr2.models.components.pose_transformer import TransformerDecoder
-
-
-@dataclass
-class SMPLPredParams:
-    """SMPL prediction parameters.
-
-    Attributes:
-        global_orient: Global rotation matrices of shape (B, 1, 3, 3)
-        body_pose: Body joint rotation matrices of shape (B, 23, 3, 3)
-        betas: Shape parameters of shape (B, 10)
-    """
-
-    global_orient: torch.Tensor
-    body_pose: torch.Tensor
-    betas: torch.Tensor
 
 
 def build_smpl_head(cfg):
@@ -71,7 +58,7 @@ class SMPLTransformerDecoderHead(nn.Module):
         self.register_buffer("init_betas", init_betas)
         self.register_buffer("init_cam", init_cam)
 
-    def forward(self, x: torch.Tensor) -> Tuple[SMPLPredParams, torch.Tensor, Dict[str, torch.Tensor]]:
+    def forward(self, x: torch.Tensor) -> Tuple[HMRSMPLOutput, torch.Tensor, Dict[str, torch.Tensor]]:
         """Forward pass of the SMPL Transformer decoder head.
 
         This method takes a feature map from a backbone network and predicts SMPL parameters
@@ -83,7 +70,7 @@ class SMPLTransformerDecoderHead(nn.Module):
                 where B is batch size, C is number of channels, H and W are spatial dimensions
 
         Returns:
-            pred_smpl_params: SMPLPredParams containing:
+            pred_smpl_params: HMRSMPLOutput containing:
                 - global_orient: Global rotation matrices of shape (B, 1, 3, 3)
                 - body_pose: Body joint rotation matrices of shape (B, 23, 3, 3)
                 - betas: Shape parameters of shape (B, 10)
@@ -144,7 +131,7 @@ class SMPLTransformerDecoderHead(nn.Module):
         pred_smpl_params_list["cam"] = torch.cat(pred_cam_list, dim=0)
         pred_body_pose = joint_conversion_fn(pred_body_pose).view(batch_size, self.cfg.SMPL.NUM_BODY_JOINTS + 1, 3, 3)
 
-        pred_smpl_params = SMPLPredParams(
+        pred_smpl_params = HMRSMPLOutput(
             global_orient=pred_body_pose[:, [0]],
             body_pose=pred_body_pose[:, 1:],
             betas=pred_betas,

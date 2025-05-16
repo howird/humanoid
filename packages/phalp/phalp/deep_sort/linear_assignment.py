@@ -3,41 +3,53 @@ Modified code from https://github.com/nwojke/deep_sort
 """
 
 from __future__ import absolute_import
+from typing import List
 
 import numpy as np
 
-
-def linear_assignment(cost_matrix):
-    try:
-        from sklearn.utils.linear_assignment_ import linear_assignment
-
-        return linear_assignment(cost_matrix)
-    except ImportError:
-        try:
-            import lap
-
-            _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
-            return np.array([[y[i], i] for i in x if i >= 0])
-        except ImportError:
-            from scipy.optimize import linear_sum_assignment
-
-            x, y = linear_sum_assignment(cost_matrix)
-            return np.array(list(zip(x, y)))
+from phalp.common.detection import Detection
 
 
 INFTY_COST = 1e5
 
 
-def min_cost_matching(distance_metric, max_distance, tracks, detections, track_indices=None, detection_indices=None):
-    if track_indices is None:
-        track_indices = np.arange(len(tracks))
-    if detection_indices is None:
-        detection_indices = np.arange(len(detections))
+def linear_assignment(cost_matrix):
+    # TODO(howird): benchmark the following
+    # try:
+    #     from sklearn.utils.linear_assignment_ import linear_assignment
+    #
+    #     return linear_assignment(cost_matrix)
+    # except ImportError:
+    #     try:
+    #         import lap
+    #
+    #         _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
+    #         return np.array([[y[i], i] for i in x if i >= 0])
+    #     except ImportError:
+    from scipy.optimize import linear_sum_assignment
 
+    x, y = linear_sum_assignment(cost_matrix)
+    return np.array(list(zip(x, y)))
+
+
+def gated_metric(distance_fn, tracks, dets: List[Detection], track_indices, detection_indices):
+    appe_emb = np.array([dets[i].detection_data["appe"] for i in detection_indices])
+    loca_emb = np.array([dets[i].detection_data["loca"] for i in detection_indices])
+    pose_emb = np.array([dets[i].detection_data["pose"] for i in detection_indices])
+    uv_maps = np.array([dets[i].detection_data["uv"] for i in detection_indices])
+    targets = np.array([tracks[i].track_id for i in track_indices])
+
+    return distance_fn(
+        [appe_emb, loca_emb, pose_emb, uv_maps],
+        targets,
+    )
+
+
+def min_cost_matching(distance_fn, max_distance, tracks, detections: List[Detection], track_indices, detection_indices):
     if len(detection_indices) == 0 or len(track_indices) == 0:
         return [], track_indices, detection_indices, 0
 
-    cost_matrix_a = distance_metric(tracks, detections, track_indices, detection_indices)
+    cost_matrix_a = gated_metric(distance_fn, tracks, detections, track_indices, detection_indices)
     cost_matrix = cost_matrix_a
 
     cost_matrix[cost_matrix > max_distance] = max_distance + 1e-5
@@ -66,7 +78,7 @@ def min_cost_matching(distance_metric, max_distance, tracks, detections, track_i
 
 
 def matching_simple(
-    distance_metric, max_distance, cascade_depth, tracks, detections, track_indices=None, detection_indices=None
+    distance_fn, max_distance, cascade_depth, tracks, detections, track_indices=None, detection_indices=None
 ):
     if track_indices is None:
         track_indices = list(range(len(tracks)))
@@ -76,7 +88,7 @@ def matching_simple(
     unmatched_detections = detection_indices
 
     matches, _, unmatched_detections, cost = min_cost_matching(
-        distance_metric, max_distance, tracks, detections, track_indices, unmatched_detections
+        distance_fn, max_distance, tracks, detections, track_indices, unmatched_detections
     )
 
     unmatched_tracks = list(set(track_indices) - set(k for k, _ in matches))

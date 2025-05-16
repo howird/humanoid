@@ -3,10 +3,12 @@ Modified code from https://github.com/nwojke/deep_sort
 """
 
 import copy
+from typing import Optional
 
 import numpy as np
 
-from phalp.utils.pose import get_pose_distance
+from phalp.models.hmar.hmr2 import HMR2023TextureSampler
+from phalp.deep_sort.feature_distances import get_pose_distance, get_uv_distance
 
 
 def _pdist_l2(a, b):
@@ -21,7 +23,7 @@ def _pdist_l2(a, b):
     return r2
 
 
-def _pdist(cfg, a, b, dims, phalp_tracker):
+def _pdist(a, b, prediction_features, distance_type, shot, HMAR: Optional[HMR2023TextureSampler] = None):
     a_appe, a_loca, a_pose, a_uv = [], [], [], []
     for i_ in range(len(a)):
         a_appe.append(a[i_][0])
@@ -63,39 +65,40 @@ def _pdist(cfg, a, b, dims, phalp_tracker):
     c_nlog = np.tile(cn_log, (1, len(b_appe)))
 
     r_texture = np.zeros((len(a_appe), len(b_appe)))
-    if "T" in cfg.phalp.predict:
+    if "T" in prediction_features:
+        if HMAR is None:
+            raise ValueError("Must provide HMAR model to use appearance features.")
         for ix in range(len(a_appe)):
             for iy in range(len(b_appe)):
                 accc = copy.deepcopy(a_uv[ix])
                 bccc = copy.deepcopy(b_uv[iy])
-                xu, yu, cu = phalp_tracker.get_uv_distance(accc, bccc)
+                xu, yu, cu = get_uv_distance(HMAR, accc, bccc)
                 r_texture[ix, iy] = np.sum((xu - yu) ** 2) * 100
-                if cfg.phalp.distance_type == "EQ_021":
+                if distance_type == "EQ_021":
                     r_texture[ix, iy] *= np.exp((1 - cu) / 2)
 
-    elif "A" in cfg.phalp.predict:
+    elif "A" in prediction_features:
         track_appe = a_appe / 10**3
         detect_appe = b_appe / 10**3
         r_texture = _pdist_l2(track_appe, detect_appe)
 
-    if cfg.phalp.distance_type == "A0":
+    if distance_type == "A0":
         return r_texture
-    if cfg.phalp.distance_type == "P0":
+    elif distance_type == "P0":
         return pose_distance
-    if cfg.phalp.distance_type == "L0":
+    elif distance_type == "L0":
         return loc_distance
-    if cfg.phalp.distance_type == "LC":
+    elif distance_type == "LC":
         return c_xy
-    if cfg.phalp.distance_type == "N0":
+    elif distance_type == "N0":
         return n_log
-    if cfg.phalp.distance_type == "NC":
+    elif distance_type == "NC":
         return c_nlog
-
-    if cfg.phalp.distance_type == "EQ_010":
+    elif distance_type == "EQ_010":
         betas = [3.8303, 1.5207, 0.4930, 4.5831]
         c = 1
         pose_distance[pose_distance > 1.2] = 1.2
-        if cfg.phalp.shot == 1:
+        if shot == 1:
             # For best performance under the shot change scenario
             # you can set look_back to 20.
             betas = [7.8303, 1.5207, 1e100, 1e100]
@@ -103,12 +106,12 @@ def _pdist(cfg, a, b, dims, phalp_tracker):
             track_appe = a_appe / 10**3
             detect_appe = b_appe / 10**3
             r_texture = _pdist_l2(track_appe, detect_appe)
-    elif cfg.phalp.distance_type == "EQ_019":
+    elif distance_type == "EQ_019":
         betas = [4.0536, 1.3070, 0.3792, 4.1658]
         c = 1
         pose_distance[pose_distance > 1.5] = 1.5
     else:
-        raise Exception("Unknown distance type: {}".format(cfg.phalp.distance_type))
+        raise ValueError(f"Unknown distance type: {distance_type}")
 
     xy_cxy_distance = loc_distance / (0.1 + c * np.tanh(c_xy)) / betas[2]
     n_cn_log_distance = n_log / (0.1 + c * np.tanh(c_nlog)) / betas[3]
@@ -123,7 +126,7 @@ def _pdist(cfg, a, b, dims, phalp_tracker):
     return ruv2
 
 
-def _nn_euclidean_distance_min(cfg, x, y, dims, phalp_tracker):
+def _nn_euclidean_distance_min(x, y, *args, **kwargs):
     """Helper function for nearest neighbor distance metric (Euclidean).
 
     Parameters
@@ -140,7 +143,7 @@ def _nn_euclidean_distance_min(cfg, x, y, dims, phalp_tracker):
         smallest Euclidean distance to a sample in `x`.
 
     """
-    distances_a = _pdist(cfg, x, y, dims, phalp_tracker)
+    distances_a = _pdist(x, y, *args, **kwargs)
     return np.maximum(0.0, distances_a.min(axis=0))
 
 
@@ -168,11 +171,16 @@ class NearestNeighborDistanceMetric(object):
 
     """
 
-    def __init__(self, cfg, matching_threshold, budget=None):
-        self.cfg = cfg
-        self._metric = _nn_euclidean_distance_min
+    def __init__(
+        self, predict, distance_type, matching_threshold, budget, shot, HMAR: Optional[HMR2023TextureSampler] = None
+    ):
+        self.prediction_features = predict
+        self.distance_type = distance_type
         self.matching_threshold = matching_threshold
         self.budget = budget
+        self.shot = shot
+        self.HMAR = HMAR
+
         self.samples = {}
 
     def partial_fit(self, appe_features, loca_features, pose_features, uv_maps, targets, active_targets):
@@ -186,7 +194,6 @@ class NearestNeighborDistanceMetric(object):
             An integer array of associated target identities.
         active_targets : List[int]
             A list of targets that are currently present in the scene.
-
         """
         for appe_feature, loca_feature, pose_feature, uv_map, target in zip(
             appe_features, loca_features, pose_features, uv_maps, targets
@@ -197,7 +204,7 @@ class NearestNeighborDistanceMetric(object):
 
         self.samples = {k: self.samples[k] for k in active_targets}
 
-    def distance(self, detection_features, targets, dims=None, phalp_tracker=None):
+    def distance(self, detection_features, targets):
         """Compute distance between features and targets.
 
         Parameters
@@ -217,6 +224,13 @@ class NearestNeighborDistanceMetric(object):
         """
         cost_matrix_a = np.zeros((len(targets), len(detection_features[0])))
         for i, target in enumerate(targets):
-            cost_matrix_a[i, :] = self._metric(self.cfg, self.samples[target], detection_features, dims, phalp_tracker)
+            cost_matrix_a[i, :] = _nn_euclidean_distance_min(
+                self.samples[target],
+                detection_features,
+                self.prediction_features,
+                self.distance_type,
+                self.shot,
+                self.HMAR,
+            )
 
         return cost_matrix_a

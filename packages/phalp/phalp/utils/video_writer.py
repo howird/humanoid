@@ -13,10 +13,10 @@ log = get_pylogger(__name__)
 class VideoWriter:
     """
     A context manager class for writing video files.
-    
+
     This class handles the creation and management of video files, supporting both
     direct OpenCV writing and optional FFmpeg compression.
-    
+
     Attributes:
         cfg (VideoIOConfig): Configuration for video I/O operations
         output_fps (int): Frames per second for the output video
@@ -36,7 +36,7 @@ class VideoWriter:
         self.video: Optional[Tuple[cv2.VideoWriter, str]] = None
         self._video_path: Optional[Path] = None
 
-    def __enter__(self) -> 'VideoWriter':
+    def __enter__(self) -> "VideoWriter":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -58,10 +58,7 @@ class VideoWriter:
         if t == 0:
             self._video_path = Path(video_path)
             writer = cv2.VideoWriter(
-                str(self._video_path),
-                fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
-                fps=self.output_fps,
-                frameSize=frame_size
+                str(self._video_path), fourcc=cv2.VideoWriter_fourcc(*"mp4v"), fps=self.output_fps, frameSize=frame_size
             )
             self.video = (writer, str(self._video_path))
 
@@ -76,18 +73,18 @@ class VideoWriter:
         """
         if self.video is not None:
             self.video[0].release()
-            
+
             if self.cfg.useffmpeg and self._video_path is not None:
-                compressed_path = self._video_path.with_name(f"{self._video_path.stem}_compressed{self._video_path.suffix}")
-                ret = os.system(
-                    f"ffmpeg -hide_banner -loglevel error -y -i {self._video_path} {compressed_path}"
+                compressed_path = self._video_path.with_name(
+                    f"{self._video_path.stem}_compressed{self._video_path.suffix}"
                 )
+                ret = os.system(f"ffmpeg -hide_banner -loglevel error -y -i {self._video_path} {compressed_path}")
                 # Delete original if compression was successful
                 if ret == 0:
                     self._video_path.unlink()
                     log.info(f"Compressed video saved to {compressed_path}")
                 else:
                     log.warning("FFmpeg compression failed, keeping original video")
-            
+
             self.video = None
             self._video_path = None

@@ -16,7 +16,7 @@ from phalp.configs.base import BaseConfig
 from phalp.utils.video_io_manager import VideoIOManager
 from phalp.models.hmar.hmr2 import HMR2023TextureSampler
 from phalp.trackers.phalp import PHALP
-from phalp.trackers.setup import setup_predictor, setup_detectron2
+from phalp.trackers import setup_predictor, setup_detectron2
 
 
 @dataclass

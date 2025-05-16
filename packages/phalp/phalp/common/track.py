@@ -42,11 +42,6 @@ class Track:
         self._n_init = n_init
         self._max_age = max_age
 
-        if dims is not None:
-            self.A_dim = dims[0]
-            self.P_dim = dims[1]
-            self.L_dim = dims[2]
-
         self.track_data = {"history": deque(maxlen=self.cfg.phalp.track_history), "prediction": {}}
         for _ in range(self.cfg.phalp.track_history):
             self.track_data["history"].append(detection_data)
@@ -62,7 +57,7 @@ class Track:
         if len(detection_data["annotations"]) > 0:
             self.state = TrackState.Confirmed
 
-    def predict(self, phalp_tracker, increase_age=True):
+    def predict(self, increase_age=True):
         if increase_age:
             self.age += 1
             self.time_since_update += 1

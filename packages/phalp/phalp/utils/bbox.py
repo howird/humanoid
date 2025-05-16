@@ -7,23 +7,20 @@ from phalp.utils.utils_dataset import process_image, process_mask
 
 
 def get_cropped_image(
-    image: np.ndarray,
-    bbox: np.ndarray,
-    bbox_pad: np.ndarray,
-    seg_mask: np.ndarray
+    image: np.ndarray, bbox: np.ndarray, bbox_pad: np.ndarray, seg_mask: np.ndarray
 ) -> Tuple[torch.Tensor, np.ndarray, np.ndarray, List[Dict[str, Any]], np.ndarray, np.ndarray]:
     """Process an image and a single instance's bounding box and segmentation mask.
-    
+
     1. Encodes the segmentation mask using RLE (Run-Length Encoding)
     2. Processes the mask and image according to the bounding box coordinates
     3. Returns the processed image and associated geometric information
-    
+
     Args:
         image: Input image array of shape (H, W, 3)
         bbox: Bounding box coordinates [x1, y1, x2, y2] of shape (4,)
         bbox_pad: Padded bounding box coordinates [x1, y1, x2, y2] of shape (4,)
         seg_mask: Binary segmentation mask of shape (H, W)
-    
+
     Returns:
         masked_image: Processed image tensor with mask channel of shape (4, H', W')
         center_: Center coordinates of the original bounding box of shape (2,)

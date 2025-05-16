@@ -3,12 +3,19 @@ Modified code from https://github.com/nwojke/deep_sort
 """
 
 from __future__ import absolute_import
+from typing import List, Optional, Tuple
 
-import numpy as np
 import torch
+import numpy as np
 
-from . import linear_assignment
-from .track import Track
+from phalp.common.track import Track
+from phalp.common.detection import Detection
+from phalp.configs.base import BaseConfig
+from phalp.deep_sort.nn_matching import NearestNeighborDistanceMetric
+from phalp.deep_sort.linear_assignment import matching_simple
+from phalp.deep_sort.forward_prediction import predict_future_location, predict_future_pose
+from phalp.models.hmar.hmr2 import HMR2023TextureSampler
+from phalp.models.predictor.pose_transformer_v2 import Pose_transformer_v2
 
 np.set_printoptions(formatter={"float": "{: 0.3f}".format})
 
@@ -43,29 +50,42 @@ class Tracker:
 
     """
 
-    def __init__(self, cfg, metric, max_age=30, n_init=3, phalp_tracker=None, dims=None):
+    def __init__(
+        self,
+        cfg: BaseConfig,
+        hmr_model: HMR2023TextureSampler,
+        pose_predictor: Pose_transformer_v2,
+        max_age=30,
+        n_init=3,
+        dims: Optional[Tuple[int, int, int]] = None,
+    ):
         self.cfg = cfg
-        self.metric = metric
+        self.metric = NearestNeighborDistanceMetric(
+            self.cfg.phalp.predict,
+            self.cfg.phalp.distance_type,
+            self.cfg.phalp.hungarian_th,
+            self.cfg.phalp.past_lookback,
+            self.cfg.phalp.shot,
+            hmr_model,
+        )
         self.max_age = max_age
         self.n_init = n_init
-        self.tracks = []
+        self.tracks: List[Track] = []
         self._next_id = 1
         self.tracked_cost = {}
-        self.phalp_tracker = phalp_tracker
+        self.pose_predictor = pose_predictor
 
         if dims is not None:
-            self.A_dim = dims[0]
-            self.P_dim = dims[1]
-            self.L_dim = dims[2]
+            self.A_dim, self.P_dim, self.L_dim = dims
 
     def predict(self):
         """Propagate track state distributions one time step forward.
         This function should be called once every time step, before `update`.
         """
         for track in self.tracks:
-            track.predict(self.phalp_tracker, increase_age=True)
+            track.predict(increase_age=True)
 
-    def update(self, detections, frame_t, image_name, shot):
+    def update(self, detections: List[Detection], frame_t, image_name, shot):
         """Perform measurement update and track management.
 
         Parameters
@@ -90,11 +110,11 @@ class Tracker:
 
         for track_idx, detection_idx in matches:
             self.tracks[track_idx].update(detections[detection_idx], detection_idx, shot)
-        self.accumulate_vectors([i[0] for i in matches], features=self.cfg.phalp.predict)
+        self.accumulate_vectors([i[0] for i in matches])
 
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
-        self.accumulate_vectors(unmatched_tracks, features=self.cfg.phalp.predict)
+        self.accumulate_vectors(unmatched_tracks)
 
         for detection_idx in unmatched_detections:
             self._initiate_track(detections[detection_idx], detection_idx)
@@ -124,38 +144,26 @@ class Tracker:
         return matches
 
     def _match(self, detections):
-        def gated_metric(tracks, dets, track_indices, detection_indices):
-            appe_emb = np.array([dets[i].detection_data["appe"] for i in detection_indices])
-            loca_emb = np.array([dets[i].detection_data["loca"] for i in detection_indices])
-            pose_emb = np.array([dets[i].detection_data["pose"] for i in detection_indices])
-            uv_maps = np.array([dets[i].detection_data["uv"] for i in detection_indices])
-            targets = np.array([tracks[i].track_id for i in track_indices])
-            cost_matrix = self.metric.distance(
-                [appe_emb, loca_emb, pose_emb, uv_maps],
-                targets,
-                dims=[self.A_dim, self.P_dim, self.L_dim],
-                phalp_tracker=self.phalp_tracker,
-            )
-
-            return cost_matrix
-
         # Split track set into confirmed and unconfirmed tracks.
         confirmed_tracks = [i for i, t in enumerate(self.tracks) if t.is_confirmed() or t.is_tentative()]
 
         # Associate confirmed tracks using appearance features.
-        matches, unmatched_tracks, unmatched_detections, cost_matrix = linear_assignment.matching_simple(
-            gated_metric, self.metric.matching_threshold, self.max_age, self.tracks, detections, confirmed_tracks
+        matches, unmatched_tracks, unmatched_detections, cost_matrix = matching_simple(
+            self.metric.distance,
+            self.metric.matching_threshold,
+            self.max_age,
+            self.tracks,
+            detections,
+            confirmed_tracks,
         )
 
         track_gt = [
-            t.track_data["history"][-1]["ground_truth"]
-            for i, t in enumerate(self.tracks)
-            if t.is_confirmed() or t.is_tentative()
+            t.track_data["history"][-1]["ground_truth"] for t in self.tracks if t.is_confirmed() or t.is_tentative()
         ]
-        detect_gt = [d.detection_data["ground_truth"] for i, d in enumerate(detections)]
+        detect_gt = [d.detection_data["ground_truth"] for d in detections]
 
         track_idt = [i for i, t in enumerate(self.tracks) if t.is_confirmed() or t.is_tentative()]
-        detect_idt = [i for i, d in enumerate(detections)]
+        detect_idt = list(range(len(detections)))
 
         if self.cfg.use_gt:
             matches = []
@@ -195,7 +203,7 @@ class Tracker:
         self.tracks.append(new_track)
         self._next_id += 1
 
-    def accumulate_vectors(self, track_ids, features="APL"):
+    def accumulate_vectors(self, track_ids):
         a_features = []
         p_features = []
         l_features = []
@@ -204,13 +212,14 @@ class Tracker:
         confidence = []
         is_tracks = 0
         p_data = []
+
         for track_idx in track_ids:
             t_features.append(
                 [self.tracks[track_idx].track_data["history"][i]["time"] for i in range(self.cfg.phalp.track_history)]
             )
             l_time.append(self.tracks[track_idx].time_since_update)
 
-            if "L" in features:
+            if "L" in self.cfg.phalp.predict:
                 l_features.append(
                     np.array(
                         [
@@ -219,24 +228,6 @@ class Tracker:
                         ]
                     )
                 )
-            if "P" in features:
-                p_features.append(
-                    np.array(
-                        [
-                            self.tracks[track_idx].track_data["history"][i]["pose"]
-                            for i in range(self.cfg.phalp.track_history)
-                        ]
-                    )
-                )
-            if "P" in features:
-                t_id = self.tracks[track_idx].track_id
-                p_data.append(
-                    [
-                        [data["xy"][0], data["xy"][1], data["scale"], data["scale"], data["time"], t_id]
-                        for data in self.tracks[track_idx].track_data["history"]
-                    ]
-                )
-            if "L" in features:
                 confidence.append(
                     np.array(
                         [
@@ -245,27 +236,49 @@ class Tracker:
                         ]
                     )
                 )
+
+            if "P" in self.cfg.phalp.predict:
+                p_features.append(
+                    np.array(
+                        [
+                            self.tracks[track_idx].track_data["history"][i]["pose"]
+                            for i in range(self.cfg.phalp.track_history)
+                        ]
+                    )
+                )
+                t_id = self.tracks[track_idx].track_id
+                p_data.append(
+                    [
+                        [data["xy"][0], data["xy"][1], data["scale"], data["scale"], data["time"], t_id]
+                        for data in self.tracks[track_idx].track_data["history"]
+                    ]
+                )
+
             is_tracks = 1
 
         l_time = np.array(l_time)
         t_features = np.array(t_features)
-        if "P" in features:
+
+        if "P" in self.cfg.phalp.predict:
             p_features = np.array(p_features)
-        if "P" in features:
             p_data = np.array(p_data)
-        if "L" in features:
+
+        if "L" in self.cfg.phalp.predict:
             l_features = np.array(l_features)
-        if "L" in features:
             confidence = np.array(confidence)
 
         if is_tracks:
             with torch.no_grad():
-                if "P" in features:
-                    p_pred = self.phalp_tracker.forward_for_tracking([p_features, p_data, t_features], "P", l_time)
-                if "L" in features:
-                    l_pred = self.phalp_tracker.forward_for_tracking([l_features, t_features, confidence], "L", l_time)
+                if "P" in self.cfg.phalp.predict:
+                    p_pred = predict_future_pose(p_features, p_data, t_features, l_time, self.pose_predictor)
+
+                if "L" in self.cfg.phalp.predict:
+                    l_pred = predict_future_location(
+                        l_features, t_features, confidence, l_time, self.cfg.phalp.distance_type
+                    )
 
             for p_id, track_idx in enumerate(track_ids):
                 self.tracks[track_idx].add_predicted(
-                    pose=p_pred[p_id] if ("P" in features) else None, loca=l_pred[p_id] if ("L" in features) else None
+                    pose=p_pred[p_id] if ("P" in self.cfg.phalp.predict) else None,
+                    loca=l_pred[p_id] if ("L" in self.cfg.phalp.predict) else None,
                 )
