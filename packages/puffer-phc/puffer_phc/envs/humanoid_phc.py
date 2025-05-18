@@ -225,9 +225,9 @@ class HumanoidPHC:
         # Check if the body ids are consistent between humanoid_asset and body_names (SMPL_MUJOCO_NAMES)
         for body_id, body_name in enumerate(BODY_NAMES):
             body_id_asset = self.gym.find_asset_rigid_body_index(self.humanoid_asset, body_name)
-            assert body_id == body_id_asset, (
-                f"Body id {body_id} does not match index {body_id_asset} for body {body_name}"
-            )
+            assert (
+                body_id == body_id_asset
+            ), f"Body id {body_id} does not match index {body_id_asset} for body {body_name}"
 
     def _create_force_sensors(self, sensor_joint_names):
         sensor_pose = gymapi.Transform()  # type: ignore
@@ -457,11 +457,11 @@ class HumanoidPHC:
 
     def _define_gym_spaces(self):
         ### Observations
-        # Self obs: height + num_bodies * 15 (pos + vel + rot + ang_vel) - root_pos
+        # Self obs: height + num_bodies * 15 (pos + vel + rot + ang_vel) - root_pos = 358
         self._num_self_obs = 1 + self.num_bodies * (3 + 6 + 3 + 3) - 3
 
         # Task obs: what goes into this? Check compute obs
-        self._task_obs_size = len(TRACK_BODIES) * self.num_bodies
+        self._task_obs_size = len(TRACK_BODIES) * self.num_bodies  # = 24*24
 
         self.num_obs = self._num_self_obs + self._task_obs_size  # = 934
         assert self.num_obs == 934
@@ -501,8 +501,8 @@ class HumanoidPHC:
         # sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)  # Keep this as reference
         rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
         contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
-
         dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
+
         self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(self.cfg.num_envs, self.num_dof)
 
         self._refresh_sim_tensors()
@@ -557,7 +557,7 @@ class HumanoidPHC:
         self.obs_buf = torch.zeros((self.cfg.num_envs, self.num_obs), device=self.cfg.device, dtype=torch.float)
         # self.self_obs_buf = torch.zeros((self.cfg.num_envs, self._num_self_obs), device=self.cfg.device, dtype=torch.float)
 
-        self.rew_buf = torch.zeros(self.cfg.num_envs, device=self.cfg.device, dtype=torch.float)
+        self.rew_buf = torch(self.cfg.num_envs, device=self.cfg.device, dtype=torch.float)
         # TODO(howird): store indiviaul reward components. 4 and 5 are hardcoded for now.
         self.reward_raw = torch.zeros(
             (
@@ -993,59 +993,59 @@ class HumanoidPHC:
             )
 
     # NOTE: This produces "simplified" amp obs, which goes into the discriminator
-    def _compute_state_obs(self, env_ids=None):
-        if env_ids is None:
-            env_ids = slice(None)
-
-        body_pos = self._rigid_body_pos[env_ids]  # [..., self._track_bodies_id]
-        body_rot = self._rigid_body_rot[env_ids]  # [..., self._track_bodies_id]
-        body_vel = self._rigid_body_vel[env_ids]  # [..., self._track_bodies_id]
-        body_ang_vel = self._rigid_body_ang_vel[env_ids]  # [..., self._track_bodies_id]
-
-        sim_obs = compute_humanoid_observations_smpl_max(
-            body_pos,
-            body_rot,
-            body_vel,
-            body_ang_vel,
-            None,
-            None,
-            self.cfg.local_root_obs,  # Constant: True
-            self.cfg.root_height_obs,  # Constant: True
-            self.cfg.robot.has_upright_start,  # Constant: True
-            self.cfg.robot.has_shape_obs,  # Constant: False
-            self.cfg.robot.has_limb_weight_obs,  # Constant: False
-        )
-
-        motion_times = (
-            (self.progress_buf[env_ids] + 1) * self.isaac_base.dt
-            + self._motion_start_times[env_ids]
-            + self._motion_start_times_offset[env_ids]
-        )  # Next frame, so +1
-
-        motion_res = self._get_state_from_motionlib_cache(
-            self._sampled_motion_ids[env_ids], motion_times, self._global_offset[env_ids]
-        )  # pass in the env_ids such that the motion is in synced.
-
-        demo_pos = motion_res["rg_pos"]  # [..., self._track_bodies_id]
-        demo_rot = motion_res["rb_rot"]  # [..., self._track_bodies_id]
-        demo_vel = motion_res["body_vel"]  # [..., self._track_bodies_id]
-        demo_ang_vel = motion_res["body_ang_vel"]  # [..., self._track_bodies_id]
-
-        demo_obs = compute_humanoid_observations_smpl_max(
-            demo_pos,
-            demo_rot,
-            demo_vel,
-            demo_ang_vel,
-            None,
-            None,
-            True,  # Constant: True
-            self.cfg.root_height_obs,  # Constant: True
-            self.cfg.robot.has_upright_start,  # Constant: True
-            self.cfg.robot.has_shape_obs,  # Constant: False
-            self.cfg.robot.has_limb_weight_obs,  # Constant: False
-        )
-
-        return sim_obs, demo_obs
+    # def _compute_state_obs(self, env_ids=None):
+    #     if env_ids is None:
+    #         env_ids = slice(None)
+    #
+    #     body_pos = self._rigid_body_pos[env_ids]  # [..., self._track_bodies_id]
+    #     body_rot = self._rigid_body_rot[env_ids]  # [..., self._track_bodies_id]
+    #     body_vel = self._rigid_body_vel[env_ids]  # [..., self._track_bodies_id]
+    #     body_ang_vel = self._rigid_body_ang_vel[env_ids]  # [..., self._track_bodies_id]
+    #
+    #     sim_obs = compute_humanoid_observations_smpl_max(
+    #         body_pos,
+    #         body_rot,
+    #         body_vel,
+    #         body_ang_vel,
+    #         None,
+    #         None,
+    #         self.cfg.local_root_obs,  # Constant: True
+    #         self.cfg.root_height_obs,  # Constant: True
+    #         self.cfg.robot.has_upright_start,  # Constant: True
+    #         self.cfg.robot.has_shape_obs,  # Constant: False
+    #         self.cfg.robot.has_limb_weight_obs,  # Constant: False
+    #     )
+    #
+    #     motion_times = (
+    #         (self.progress_buf[env_ids] + 1) * self.isaac_base.dt
+    #         + self._motion_start_times[env_ids]
+    #         + self._motion_start_times_offset[env_ids]
+    #     )  # Next frame, so +1
+    #
+    #     motion_res = self._get_state_from_motionlib_cache(
+    #         self._sampled_motion_ids[env_ids], motion_times, self._global_offset[env_ids]
+    #     )  # pass in the env_ids such that the motion is in synced.
+    #
+    #     demo_pos = motion_res["rg_pos"]  # [..., self._track_bodies_id]
+    #     demo_rot = motion_res["rb_rot"]  # [..., self._track_bodies_id]
+    #     demo_vel = motion_res["body_vel"]  # [..., self._track_bodies_id]
+    #     demo_ang_vel = motion_res["body_ang_vel"]  # [..., self._track_bodies_id]
+    #
+    #     demo_obs = compute_humanoid_observations_smpl_max(
+    #         demo_pos,
+    #         demo_rot,
+    #         demo_vel,
+    #         demo_ang_vel,
+    #         None,
+    #         None,
+    #         True,  # Constant: True
+    #         self.cfg.root_height_obs,  # Constant: True
+    #         self.cfg.robot.has_upright_start,  # Constant: True
+    #         self.cfg.robot.has_shape_obs,  # Constant: False
+    #         self.cfg.robot.has_limb_weight_obs,  # Constant: False
+    #     )
+    #
+    #     return sim_obs, demo_obs
 
     def _compute_task_obs(self, env_ids=None, save_buffer=True):
         if env_ids is None:

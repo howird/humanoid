@@ -1,0 +1,53 @@
+[project]
+name = "humanoid-vision"
+version = "0.0.1"
+description = "Humanoid Vision: Detection and Tracking of Humans"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "av",
+  "chumpy",
+  "dill",
+  "einops",
+  "gdown",
+  "hydra-core",
+  "joblib",
+  "numpy",
+  "opencv-python",
+  "pyrender",
+  "pytorch-lightning",
+  "rich",
+  "scenedetect[opencv]",
+  "scikit-image",
+  "scikit-learn",
+  "smplx",
+  "timm",
+  "torch",
+  "torchvision",
+  "tyro",
+  "webdataset",
+  "yacs",
+
+  "detectron2 @ git+https://github.com/facebookresearch/detectron2",
+  "neural-renderer-pytorch @ git+https://github.com/shubham-goel/NMR",
+  # "neural-renderer-pytorch @ git+https://github.com/howird/NMR",
+  "pyopengl @ git+https://github.com/mmatl/pyopengl",
+  "pytube @ git+https://github.com/pytube/pytube",
+]
+license = "MIT"
+authors = [
+  { name = "Howard Nguyen-Huu", email = "howardnguyenhuu@gmail.com"}
+]
+
+[project.urls]
+Homepage = ""
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["humanoid_vision"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

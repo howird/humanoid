@@ -1056,9 +1056,9 @@ class SkeletonState(Serializable):
         :type scale_to_target_skeleton: float
         :rtype: SkeletonState
         """
-        assert len(source_tpose.shape) == 0 and len(target_tpose.shape) == 0, (
-            "the retargeting script currently doesn't support vectorized operations"
-        )
+        assert (
+            len(source_tpose.shape) == 0 and len(target_tpose.shape) == 0
+        ), "the retargeting script currently doesn't support vectorized operations"
         return self.retarget_to(
             joint_mapping,
             source_tpose.local_rotation,
@@ -1270,10 +1270,10 @@ class SkeletonMotion(SkeletonState):
         else:
             new_fps = int(fps)
             old_fps = int(self.fps)
-            assert old_fps % fps == 0, (
-                "the resampling doesn't support fps with non-integer division from the original fps: {} => {}".format(
-                    old_fps, fps
-                )
+            assert (
+                old_fps % fps == 0
+            ), "the resampling doesn't support fps with non-integer division from the original fps: {} => {}".format(
+                old_fps, fps
             )
         skip_every = old_fps // new_fps
         s = slice(start, end, skip_every)
