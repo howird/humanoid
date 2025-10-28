@@ -12,6 +12,8 @@ outputs/
 hmr2_training_data*
 packages/isaacgym/*
 !packages/isaacgym/pyproject.toml
+notebooks/
+*.ipynb
 
 ###
 ### Python

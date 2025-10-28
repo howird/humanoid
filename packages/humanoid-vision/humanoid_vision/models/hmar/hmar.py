@@ -1,18 +1,18 @@
-from dataclasses import asdict
 import numpy as np
 import torch
 import torch.nn as nn
 
+from humanoid_vision.configs.base import BaseConfig
 from humanoid_vision.models.backbones.resnet import resnet
 from humanoid_vision.models.heads.apperence_head import TextureHead
 from humanoid_vision.models.heads.encoding_head import EncodingHead
 from humanoid_vision.models.heads.smpl_mlp_head import SMPLHead
-from humanoid_vision.utils.smpl_utils import SMPL
+from humanoid_vision.models.smpl_wrapper import SMPL
 from humanoid_vision.utils.utils import compute_uvsampler, perspective_projection
 
 
 class HMAR(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg: BaseConfig):
         super(HMAR, self).__init__()
 
         self.cfg = cfg
@@ -36,8 +36,7 @@ class HMAR(nn.Module):
         self.texture_head = TextureHead(self.uv_sampler, self.cfg, img_H=img_H, img_W=img_W)
         self.encoding_head = EncodingHead(cfg=self.cfg, img_H=img_H, img_W=img_W)
 
-        smpl_cfg = {k.lower(): v for k, v in asdict(cfg.SMPL).items()}
-        self.smpl = SMPL(**smpl_cfg)
+        self.smpl = SMPL(cfg.SMPL)
 
         self.smpl_head = SMPLHead(cfg, input_dim=cfg.MODEL.SMPL_HEAD.IN_CHANNELS, pool="pooled")
 
@@ -99,7 +98,7 @@ class HMAR(nn.Module):
 
     def get_3d_parameters(
         self,
-        pred_smpl_params,
+        pred_joints,
         pred_cam,
         center=np.array([128, 128]),
         img_size=256,
@@ -114,9 +113,6 @@ class HMAR(nn.Module):
         dtype = pred_cam.dtype
         device = pred_cam.device
         focal_length = self.cfg.EXTRA.FOCAL_LENGTH * torch.ones(batch_size, 2, device=device, dtype=dtype)
-
-        smpl_output = self.smpl(**{k: v.float() for k, v in pred_smpl_params.items()}, pose2rot=False)
-        pred_joints = smpl_output.joints
 
         pred_cam_t = torch.stack(
             [
@@ -151,4 +147,4 @@ class HMAR(nn.Module):
 
         pred_keypoints_2d_smpl = (pred_keypoints_2d_smpl + 0.5) * img_size
 
-        return pred_smpl_params, pred_keypoints_2d_smpl, pred_joints, pred_cam_t
+        return pred_keypoints_2d_smpl, pred_joints, pred_cam_t

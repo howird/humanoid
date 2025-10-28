@@ -59,8 +59,7 @@ class HMR2(pl.LightningModule):
         self.smpl_parameter_loss = ParameterLoss()
 
         # Instantiate SMPL model
-        smpl_cfg = {k.lower(): v for k, v in asdict(cfg.SMPL).items()}
-        self.smpl = SMPL(**smpl_cfg)
+        self.smpl = SMPL(self.cfg.SMPL)
 
         # Buffer that shows whetheer we need to initialize ActNorm layers
         self.register_buffer("initialized", torch.tensor(False))

@@ -27,6 +27,7 @@ class HMR2023TextureSampler(HMR2018Predictor):
             cfg=cfg,
         )
         self.model.eval()
+        self.smpl = self.model.smpl
 
         # Model's all set up. Now, load tex_bmap and tex_fmap
         # Texture map atlas

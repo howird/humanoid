@@ -14,14 +14,7 @@ class HMR2018Predictor(nn.Module):
         super().__init__()
         # Old HMAR stuff
         self.hmar_old = HMAR(cfg)
-        self.smpl = self.hmar_old.smpl
-        self.load_weights(cfg.hmr.hmar_path)
-
-    def forward(self, x):
-        return self.hmar_old(x)
-
-    def load_weights(self, path):
-        self.hmar_old.load_weights(path)
+        self.hmar_old.load_weights(cfg.hmr.hmar_path)
 
     # Other stuff from hmar
     def autoencoder_hmar(self, *args, **kwargs):

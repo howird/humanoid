@@ -81,7 +81,8 @@ class RenderConfig:
     enable: bool = True
     # rendering type
     type: Literal["HUMAN_MESH", "HUMAN_MASK", "HUMAN_BBOX"] = "HUMAN_MESH"
-    up_scale: int = 2
+    up_scale: bool = False
+    up_scale_factor: int = 2
     res: int = 256
     side_view_each: bool = False
     metallicfactor: float = 0.0
@@ -93,6 +94,11 @@ class RenderConfig:
     fps: int = 30
     blur_faces: bool = False
     show_keypoints: bool = False
+
+    def __post_init__(self):
+        # TODO(howird): there's probably a better way to do this
+        if self.up_scale:
+            self.up_scale_factor = int(self.output_resolution / self.res)
 
 
 @dataclass
@@ -111,6 +117,7 @@ class SMPLConfig:
     JOINT_REGRESSOR_EXTRA: Path = CACHE_DIR / "phalp/3D/SMPL_to_J19.pkl"
     TEXTURE: Path = CACHE_DIR / "phalp/3D/texture.npz"
     MEAN_PARAMS: Path = CACHE_DIR / "phalp/3D/smpl_mean_params.npz"
+    UPDATE_HIPS: bool = False
 
 
 @dataclass
@@ -186,7 +193,7 @@ class BaseConfig:
     expand_bbox_shape: Optional[Tuple[int, int]] = (192, 256)
 
     # Fields
-    video: VideoIOConfig = field(default_factory=VideoIOConfig)
+    video_io: VideoIOConfig = field(default_factory=VideoIOConfig)
     phalp: PHALPConfig = field(default_factory=PHALPConfig)
     pose_predictor: PosePredictorConfig = field(default_factory=PosePredictorConfig)
     ava_config: AVAConfig = field(default_factory=AVAConfig)

@@ -27,6 +27,8 @@ cp -r <PATH TO EXTRACTED ISAACGYM>/isaacgym/python/* packages/isaacgym/
 uv venv
 source .venv/bin/activate
 uv sync
+uv pip install setuptools torch
+uv sync --no-build-isolation-package detectron2 --no-build-isolation-package neural-renderer-pytorch
 ```
 
 5. Download the SMPL parameters from [SMPL](https://smpl.is.tue.mpg.de/), and
@@ -35,6 +37,12 @@ uv sync
    `basicmodel_m_lbs_10_207_0_v1.1.0.pkl`,
    `basicmodel_f_lbs_10_207_0_v1.1.0.pkl` to `SMPL_NEUTRAL.pkl`, `SMPL_MALE.pkl`
    and `SMPL_FEMALE.pkl`.
+
+6. If you are going to use 4D-humans, download the required weights:
+
+```bash
+python ./packages/humanoid-vision/scripts/download_weights.py
+```
 
 # References
 

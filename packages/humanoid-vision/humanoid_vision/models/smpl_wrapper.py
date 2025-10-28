@@ -2,33 +2,37 @@ import torch
 import pickle
 
 from dataclasses import asdict
-from typing import Optional
 
 import smplx
 from smplx.lbs import vertices2joints
 from smplx.utils import SMPLOutput
 
 from humanoid_vision.common.smpl_output import HMRSMPLOutput
+from humanoid_vision.configs.base import SMPLConfig
 
 
 class SMPL(smplx.SMPLLayer):
-    def __init__(self, *args, joint_regressor_extra: Optional[str] = None, update_hips: bool = False, **kwargs):
+    def __init__(self, cfg: SMPLConfig):
         """
         Extension of the official SMPL implementation to support more joints.
         Args:
             Same as SMPLLayer.
             joint_regressor_extra (str): Path to extra joint regressor.
         """
-        super(SMPL, self).__init__(*args, **kwargs)
+        super(SMPL, self).__init__(
+            model_path=cfg.MODEL_PATH, gender=cfg.GENDER, model_type=cfg.MODEL_TYPE, num_body_joints=cfg.NUM_BODY_JOINTS
+        )
         smpl_to_openpose = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 
-        if joint_regressor_extra is not None:
+        if cfg.JOINT_REGRESSOR_EXTRA is not None:
             self.register_buffer(
                 "joint_regressor_extra",
-                torch.tensor(pickle.load(open(joint_regressor_extra, "rb"), encoding="latin1"), dtype=torch.float32),
+                torch.tensor(
+                    pickle.load(open(cfg.JOINT_REGRESSOR_EXTRA, "rb"), encoding="latin1"), dtype=torch.float32
+                ),
             )
         self.register_buffer("joint_map", torch.tensor(smpl_to_openpose, dtype=torch.long))
-        self.update_hips = update_hips
+        self.update_hips = cfg.UPDATE_HIPS
 
     def forward(self, hmr_smpl_output: HMRSMPLOutput, *args, **kwargs) -> SMPLOutput:
         """

@@ -3,7 +3,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import cv2
 import joblib
@@ -22,11 +22,9 @@ from humanoid_vision.models.hmar.hmr2 import HMAROutput, HMR2023TextureSampler
 from humanoid_vision.common.detection import Detection
 
 from humanoid_vision.visualize.postprocessor import Postprocessor
-from humanoid_vision.visualize.visualizer import Visualizer
 
 from humanoid_vision.utils.utils import progress_bar, smpl_to_pose_camera_vector
 from humanoid_vision.utils.utils_detectron2_phalp import DefaultPredictor_Lazy
-from humanoid_vision.utils.video_writer import VideoWriter
 from humanoid_vision.utils.bbox import get_cropped_image
 from humanoid_vision.utils.pylogger_phalp import get_pylogger
 
@@ -51,7 +49,6 @@ class PHALP(nn.Module):
         self.pose_predictor = pose_predictor
         self.detector = detector
 
-        self.visualizer = Visualizer(self.cfg, self.HMAR)
         self.tracker = Tracker(
             self.cfg,
             self.HMAR,
@@ -69,29 +66,25 @@ class PHALP(nn.Module):
         self.to(self.device)
         self.train() if (self.cfg.train) else self.eval()
 
-    def track(self, video_name: str, list_of_frames: List[Path]):
+    def track(self, video_name: str, list_of_frames: List[Path]) -> Dict:
+        # TODO(howird): this key stuff is terrible design figure out how to improve this.
         eval_keys = ["tracked_ids", "tracked_bbox", "tid", "bbox", "tracked_time"]
-        history_keys = ["appe", "loca", "pose", "uv"] if self.cfg.render.enable else []
+        history_keys = (
+            (["appe", "loca", "pose", "uv"] if self.cfg.render.enable else [])
+            + ["center", "scale", "size", "img_path", "img_name", "class_name", "conf", "annotations"]
+            + ["smpl", "camera", "camera_bbox", "3d_joints", "2d_joints", "mask"]
+        )
         prediction_keys = ["prediction_uv", "prediction_pose", "prediction_loca"] if self.cfg.render.enable else []
-        extra_keys_1 = ["center", "scale", "size", "img_path", "img_name", "class_name", "conf", "annotations"]
-        extra_keys_2 = ["smpl", "camera", "camera_bbox", "3d_joints", "2d_joints", "mask"]
-        history_keys = history_keys + extra_keys_1 + extra_keys_2
+
         visual_store_ = eval_keys + history_keys + prediction_keys
-        tmp_keys_ = ["uv", "prediction_uv", "prediction_pose", "prediction_loca"]
+        tmp_keys = ["uv", "prediction_uv", "prediction_pose", "prediction_loca"]
 
-        (self.cfg.video.output_dir / video_name).mkdir(parents=True, exist_ok=True)
-
-        pkl_path = self.cfg.video.output_dir / f"{self.cfg.track_dataset}_{video_name}.pkl"
-        video_path = self.cfg.video.output_dir / f"{self.cfg.base_tracker}_{video_name}.mp4"
-
-        # check if the video is already processed
-        if not (self.cfg.overwrite) and pkl_path.is_file():
-            return 0
+        (self.cfg.video_io.output_dir / video_name).mkdir(parents=True, exist_ok=True)
 
         # eval mode
         self.eval()
 
-        log.info(f"Saving tracks at : {self.cfg.video.output_dir}")
+        log.info(f"Saving tracks at : {self.cfg.video_io.output_dir}")
 
         list_of_frames = (
             list_of_frames
@@ -103,132 +96,109 @@ class PHALP(nn.Module):
         tracked_frames = []
         final_visuals_dic = {}
 
-        with VideoWriter(self.cfg.video, self.cfg.render.fps) as vwriter:
-            for t, frame_name in progress_bar(
-                enumerate(list_of_frames),
-                description=f"Tracking : {video_name}",
-                total=len(list_of_frames),
-                disable=False,
-            ):
-                image_frame = cv2.imread(str(frame_name))
-                img_height, img_width, _ = image_frame.shape
-                new_image_size = max(img_height, img_width)
-                top, left = (
-                    (new_image_size - img_height) // 2,
-                    (new_image_size - img_width) // 2,
-                )
-                measurments = [img_height, img_width, new_image_size, left, top]
-                self.cfg.phalp.shot = 1 if t in list_of_shots else 0
+        for t, frame_path in progress_bar(
+            enumerate(list_of_frames),
+            description=f"Tracking : {video_name}",
+            total=len(list_of_frames),
+            disable=False,
+        ):
+            frame_name = frame_path.name
+            image_frame = cv2.imread(str(frame_path))
+            img_height, img_width, _ = image_frame.shape
+            new_image_size = max(img_height, img_width)
+            top, left = (
+                (new_image_size - img_height) // 2,
+                (new_image_size - img_width) // 2,
+            )
+            measurments = [img_height, img_width, new_image_size, left, top]
+            self.cfg.phalp.shot = 1 if t in list_of_shots else 0
 
-                if self.cfg.render.enable:
-                    # reset the renderer
-                    # TODO: add a flag for full resolution rendering
-                    self.cfg.render.up_scale = int(self.cfg.render.output_resolution / self.cfg.render.res)
-                    self.visualizer.reset_render(self.cfg.render.res * self.cfg.render.up_scale)
+            ############ detection ##############
+            pred_bbox, pred_bbox_pad, pred_masks, pred_scores, pred_classes, gt_tids, gt_annots = self.get_detections(
+                image_frame, frame_path, t
+            )
 
-                ############ detection ##############
-                pred_bbox, pred_bbox_pad, pred_masks, pred_scores, pred_classes, gt_tids, gt_annots = (
-                    self.get_detections(image_frame, frame_name, t)
-                )
+            ############ HMAR ##############
+            detections = self.get_human_features(
+                image_frame,
+                pred_masks,
+                pred_bbox,
+                pred_bbox_pad,
+                pred_scores,
+                frame_path,
+                pred_classes,
+                t,
+                measurments,
+                gt_tids,
+                gt_annots,
+            )
 
-                ############ HMAR ##############
-                detections = self.get_human_features(
-                    image_frame,
-                    pred_masks,
-                    pred_bbox,
-                    pred_bbox_pad,
-                    pred_scores,
-                    frame_name,
-                    pred_classes,
-                    t,
-                    measurments,
-                    gt_tids,
-                    gt_annots,
-                )
+            ############ tracking ##############
+            self.tracker.predict()
+            self.tracker.update(detections, t, frame_name, self.cfg.phalp.shot)
 
-                ############ tracking ##############
-                self.tracker.predict()
-                self.tracker.update(detections, t, frame_name, self.cfg.phalp.shot)
+            ############ record the results ##############
+            final_visuals_dic.setdefault(frame_name, {"time": t, "shot": self.cfg.phalp.shot, "frame_path": frame_path})
 
-                ############ record the results ##############
-                final_visuals_dic.setdefault(
-                    frame_name, {"time": t, "shot": self.cfg.phalp.shot, "frame_path": frame_name}
-                )
+            for key_ in visual_store_:
+                final_visuals_dic[frame_name][key_] = []
 
-                if self.cfg.render.enable:
-                    final_visuals_dic[frame_name]["frame"] = image_frame
+            ############ record the track states (history and predictions) ##############
+            for tracks_ in self.tracker.tracks:
+                if frame_name not in tracked_frames:
+                    tracked_frames.append(frame_name)
+                if not (tracks_.is_confirmed()):
+                    continue
 
-                for key_ in visual_store_:
-                    final_visuals_dic[frame_name][key_] = []
+                track_id = tracks_.track_id
+                track_data_hist = tracks_.track_data["history"][-1]
+                track_data_pred = tracks_.track_data["prediction"]
 
-                ############ record the track states (history and predictions) ##############
-                for tracks_ in self.tracker.tracks:
-                    if frame_name not in tracked_frames:
-                        tracked_frames.append(frame_name)
-                    if not (tracks_.is_confirmed()):
-                        continue
+                final_visuals_dic[frame_name]["tid"].append(track_id)
+                final_visuals_dic[frame_name]["bbox"].append(track_data_hist["bbox"])
+                final_visuals_dic[frame_name]["tracked_time"].append(tracks_.time_since_update)
 
-                    track_id = tracks_.track_id
-                    track_data_hist = tracks_.track_data["history"][-1]
-                    track_data_pred = tracks_.track_data["prediction"]
+                for hkey in history_keys:
+                    final_visuals_dic[frame_name][hkey].append(track_data_hist[hkey])
 
-                    final_visuals_dic[frame_name]["tid"].append(track_id)
-                    final_visuals_dic[frame_name]["bbox"].append(track_data_hist["bbox"])
-                    final_visuals_dic[frame_name]["tracked_time"].append(tracks_.time_since_update)
+                for pkey in prediction_keys:
+                    final_visuals_dic[frame_name][pkey].append(track_data_pred[pkey.split("_")[1]][-1])
 
-                    for hkey_ in history_keys:
-                        final_visuals_dic[frame_name][hkey_].append(track_data_hist[hkey_])
-                    for pkey_ in prediction_keys:
-                        final_visuals_dic[frame_name][pkey_].append(track_data_pred[pkey_.split("_")[1]][-1])
+                if tracks_.time_since_update == 0:
+                    final_visuals_dic[frame_name]["tracked_ids"].append(track_id)
+                    final_visuals_dic[frame_name]["tracked_bbox"].append(track_data_hist["bbox"])
 
-                    if tracks_.time_since_update == 0:
-                        final_visuals_dic[frame_name]["tracked_ids"].append(track_id)
-                        final_visuals_dic[frame_name]["tracked_bbox"].append(track_data_hist["bbox"])
+                    if tracks_.hits == self.cfg.phalp.n_init:
+                        for pt in range(self.cfg.phalp.n_init - 1):
+                            track_data_hist_ = tracks_.track_data["history"][-2 - pt]
+                            track_data_pred_ = tracks_.track_data["prediction"]
+                            frame_name_ = tracked_frames[-2 - pt]
+                            final_visuals_dic[frame_name_]["tid"].append(track_id)
+                            final_visuals_dic[frame_name_]["bbox"].append(track_data_hist_["bbox"])
+                            final_visuals_dic[frame_name_]["tracked_ids"].append(track_id)
+                            final_visuals_dic[frame_name_]["tracked_bbox"].append(track_data_hist_["bbox"])
+                            final_visuals_dic[frame_name_]["tracked_time"].append(0)
 
-                        if tracks_.hits == self.cfg.phalp.n_init:
-                            for pt in range(self.cfg.phalp.n_init - 1):
-                                track_data_hist_ = tracks_.track_data["history"][-2 - pt]
-                                track_data_pred_ = tracks_.track_data["prediction"]
-                                frame_name_ = tracked_frames[-2 - pt]
-                                final_visuals_dic[frame_name_]["tid"].append(track_id)
-                                final_visuals_dic[frame_name_]["bbox"].append(track_data_hist_["bbox"])
-                                final_visuals_dic[frame_name_]["tracked_ids"].append(track_id)
-                                final_visuals_dic[frame_name_]["tracked_bbox"].append(track_data_hist_["bbox"])
-                                final_visuals_dic[frame_name_]["tracked_time"].append(0)
+                            for hkey in history_keys:
+                                final_visuals_dic[frame_name_][hkey].append(track_data_hist_[hkey])
+                            for pkey in prediction_keys:
+                                final_visuals_dic[frame_name_][pkey].append(track_data_pred_[pkey.split("_")[1]][-1])
 
-                                for hkey_ in history_keys:
-                                    final_visuals_dic[frame_name_][hkey_].append(track_data_hist_[hkey_])
-                                for pkey_ in prediction_keys:
-                                    final_visuals_dic[frame_name_][pkey_].append(
-                                        track_data_pred_[pkey_.split("_")[1]][-1]
-                                    )
-
-                ############ save the video ##############
-                if self.cfg.render.enable and t >= self.cfg.phalp.n_init:
-                    d_ = self.cfg.phalp.n_init + 1 if (t + 1 == len(list_of_frames)) else 1
-                    for t_ in range(t, t + d_):
-                        frame_key = list_of_frames[t_ - self.cfg.phalp.n_init]
-                        rendered, f_size = self.visualizer.render_video(final_visuals_dic[frame_key])
-
-                        # save the rendered frame
-                        vwriter.save_video(video_path, rendered, f_size, t=t_ - self.cfg.phalp.n_init)
-
-                        # delete the frame after rendering it
-                        del final_visuals_dic[frame_key]["frame"]
-
-                        # delete unnecessary keys
-                        for tkey_ in tmp_keys_:
-                            del final_visuals_dic[frame_key][tkey_]
-
-            joblib.dump(final_visuals_dic, pkl_path, compress=3)
+            # get rid of keys?! this was here from before i moved the visulizer out of this class
+            if self.cfg.render.enable and t >= self.cfg.phalp.n_init:
+                d = self.cfg.phalp.n_init + 1 if (t + 1 == len(list_of_frames)) else 1
+                for t_ in range(t, t + d):
+                    frame_key = list_of_frames[t_ - self.cfg.phalp.n_init].name
+                    for tkey in tmp_keys:
+                        del final_visuals_dic[frame_key][tkey]
 
         if self.cfg.use_gt:
             joblib.dump(
                 self.tracker.tracked_cost,
-                self.cfg.video.output_dir / f"{video_name}_{self.cfg.phalp.start_frame}_distance.pkl",
+                self.cfg.video_io.output_dir / f"{video_name}_{self.cfg.phalp.start_frame}_distance.pkl",
             )
 
-        return final_visuals_dic, pkl_path
+        return final_visuals_dic
 
     def get_detections(self, image, frame_name, t, additional_data={}, measurments=None):
         outputs = self.detector(image)
@@ -313,16 +283,26 @@ class PHALP(nn.Module):
             appe_embedding = self.HMAR.autoencoder_hmar(uv_vector, en=True)
             appe_embedding = appe_embedding.view(appe_embedding.shape[0], -1)
 
-            pred_smpl_params, pred_joints_2d, pred_joints, pred_cam = self.HMAR.get_3d_parameters(
-                # HACK(howird)
-                dict(body_pose=hmar_out.body_pose, betas=hmar_out.betas, global_orient=hmar_out.global_orient),
+            # TODO(howird): check if the .float() is needed
+            pred_joints = self.HMAR.smpl(hmar_out).joints
+
+            pred_joints_2d, pred_joints, pred_cam = self.HMAR.get_3d_parameters(
+                # # HACK(howird)
+                # dict(),
+                pred_joints,
                 hmar_out.pred_cam,
                 center=(np.array(center_list) + np.array([left, top])) * ratio,
                 img_size=self.cfg.render.res,
                 scale=np.max(np.array(scale_list), axis=1, keepdims=True) * ratio,
             )
+
             pred_smpl_params = [
-                {k: v[i].cpu().numpy() for k, v in pred_smpl_params.items()} for i in range(num_valid_persons)
+                dict(
+                    body_pose=hmar_out.body_pose[i].cpu().numpy(),
+                    betas=hmar_out.betas[i].cpu().numpy(),
+                    global_orient=hmar_out.global_orient[i].cpu().numpy(),
+                )
+                for i in range(num_valid_persons)
             ]
 
             if self.cfg.phalp.pose_distance == "joints":
@@ -385,7 +365,7 @@ class PHALP(nn.Module):
         if self.cfg.detect_shots:
             if isinstance(list_of_frames[0], str):
                 # make a video if list_of_frames is frames
-                video_tmp_name = self.cfg.video.output_dir / "_TMP" / f"{video_name}.mp4"
+                video_tmp_name = self.cfg.video_io.output_dir / "_TMP" / f"{video_name}.mp4"
                 for ft_, fname_ in enumerate(list_of_frames):
                     im_ = cv2.imread(fname_)
                     if ft_ == 0:

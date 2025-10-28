@@ -1,15 +1,22 @@
 import copy
 
+from typing import Optional
+from pathlib import Path
+
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 from PIL import Image
-from pycocotools import mask as mask_utils
+import torch.nn.functional as F
 from torch.utils.data._utils.collate import default_collate
 from torchvision.utils import make_grid
+from pycocotools import mask as mask_utils
 
+from humanoid_vision.configs.base import RenderConfig
+from humanoid_vision.common.smpl_output import HMRSMPLOutput
+from humanoid_vision.models.smpl_wrapper import SMPL
 from humanoid_vision.utils.utils import get_colors, numpy_to_torch_image, perspective_projection
 from humanoid_vision.visualize.py_renderer import Renderer
 
@@ -21,25 +28,29 @@ def rect_with_opacity(image, top_left, bottom_right, fill_color, fill_opacity):
 
 
 class Visualizer(nn.Module):
-    def __init__(self, cfg, hmar):
+    def __init__(self, cfg: RenderConfig, smpl: SMPL, focal_length: int, texture_path: Optional[Path] = None):
         super(Visualizer, self).__init__()
 
         self.cfg = cfg
-        self.hmar = hmar
         self.device = "cuda"
-        if not (self.cfg.render.head_mask):
-            texture_file = np.load(self.cfg.SMPL.TEXTURE)
+        self.focal_length = focal_length
+
+        self.smpl = smpl
+
+        if not self.cfg.head_mask:
+            assert texture_path is not None, "texture_path must be provided if RenderConfig.head_mask is false"
+            texture_file = np.load(texture_path)
             self.faces_cpu = texture_file["smpl_faces"].astype("uint32")
         else:
-            texture_file = np.load(self.cfg.render.head_mask_path)
+            texture_file = np.load(self.cfg.head_mask_path)
             self.faces_cpu = texture_file.astype("uint32")
 
-        self.render = Renderer(focal_length=self.cfg.EXTRA.FOCAL_LENGTH, img_res=256, faces=self.faces_cpu)
+        self.render = Renderer(focal_length=self.focal_length, img_res=256, faces=self.faces_cpu)
         self.render_size = 256
 
-        self.colors = get_colors(pallette=self.cfg.render.colors)
+        self.colors = get_colors(pallette=self.cfg.colors)
 
-        if self.cfg.render.blur_faces:
+        if self.cfg.blur_faces:
             try:
                 from facenet_pytorch import MTCNN
             except:
@@ -52,17 +63,17 @@ class Visualizer(nn.Module):
         del self.render
         self.render = None
         self.render = Renderer(
-            focal_length=self.cfg.EXTRA.FOCAL_LENGTH,
+            focal_length=self.focal_length,
             img_res=image_size,
             faces=self.faces_cpu,
-            metallicFactor=self.cfg.render.metallicfactor,
-            roughnessFactor=self.cfg.render.roughnessfactor,
+            metallicFactor=self.cfg.metallicfactor,
+            roughnessFactor=self.cfg.roughnessfactor,
         )
         self.render_size = image_size
 
     def render_single_frame(self, pred_smpl_params, pred_cam_t, color, img_size=256, image=None, use_image=False):
         pred_smpl_params = default_collate(pred_smpl_params)
-        smpl_output = self.hmar.smpl(**{k: v.float().cuda() for k, v in pred_smpl_params.items()}, pose2rot=False)
+        smpl_output = self.smpl(HMRSMPLOutput(**{k: v.float().cuda() for k, v in pred_smpl_params.items()}))
         pred_vertices = smpl_output.vertices.cpu()
 
         # a1 = pred_vertices[0, :, 2]>0.1
@@ -141,7 +152,7 @@ class Visualizer(nn.Module):
         mask = mask[:, :, None]
         idx = np.nonzero(mask)
 
-        if "MASK" in self.cfg.render.type:
+        if "MASK" in self.cfg.type:
             image[idx[0], idx[1], :] *= 1.0 - alpha
             image[idx[0], idx[1], :] += [alpha * x for x in cv_color]
 
@@ -198,7 +209,7 @@ class Visualizer(nn.Module):
             return numpy_to_torch_image(cv_ndarr) / 255.0
 
         tracked_smpl = default_collate(tracked_smpl)
-        smpl_output = self.hmar.smpl(**{k: v.float().cuda() for k, v in tracked_smpl.items()}, pose2rot=False)
+        smpl_output = self.smpl(**{k: v.float().cuda() for k, v in tracked_smpl.items()}, pose2rot=False)
         pred_joints = smpl_output.joints
         # pred_joints = smpl_output.vertices
         # # randomly choose 200 vertices
@@ -211,9 +222,7 @@ class Visualizer(nn.Module):
         # pred_joints = pred_joints[:, self.a1, :]
         batch_size = pred_joints.shape[0]
         camera_center = torch.zeros(batch_size, 2, device=self.device, dtype=pred_joints.dtype)
-        focal_length = self.cfg.EXTRA.FOCAL_LENGTH * torch.ones(
-            batch_size, 2, device=self.device, dtype=pred_joints.dtype
-        )
+        focal_length = self.focal_length * torch.ones(batch_size, 2, device=self.device, dtype=pred_joints.dtype)
         pred_keypoints_2d_smpl = perspective_projection(
             pred_joints,
             rotation=torch.eye(
@@ -232,7 +241,7 @@ class Visualizer(nn.Module):
         pred_keypoints_2d_smpl[:, :, 1] -= (img_size - img_h) / 2
 
         # # draw keypoints
-        if self.cfg.render.show_keypoints:
+        if self.cfg.show_keypoints:
             for i, box in enumerate(bbox):
                 cv_color = np.array([color[i][2], color[i][1], color[i][0]]) * 255
                 for j, keypoint in enumerate(pred_keypoints_2d_smpl[i]):
@@ -324,10 +333,9 @@ class Visualizer(nn.Module):
 
         return image
 
-    def render_video(self, final_visuals_dic):
+    def render_video(self, cv_image, final_visuals_dic):
         t_ = final_visuals_dic["time"]
         shot_ = final_visuals_dic["shot"]
-        cv_image = final_visuals_dic["frame"]
         tracked_ids = final_visuals_dic["tid"]
         tracked_time = final_visuals_dic["tracked_time"]
 
@@ -340,11 +348,11 @@ class Visualizer(nn.Module):
         NUM_PANELS = 1
         PANEL_TEXTURE = False
 
-        if "TEX_S" in self.cfg.render.type:
+        if "TEX_S" in self.cfg.type:
             tracked_appe = final_visuals_dic["uv"]
             NUM_PANELS = 2
             PANEL_TEXTURE = True
-        elif "TEX_P" in self.cfg.render.type:
+        elif "TEX_P" in self.cfg.type:
             tracked_appe = final_visuals_dic["prediction_uv"]
             NUM_PANELS = 2
             PANEL_TEXTURE = True
@@ -352,13 +360,13 @@ class Visualizer(nn.Module):
             tracked_appe = None
 
         # blur faces if needed
-        if self.cfg.render.blur_faces:
+        if self.cfg.blur_faces:
             cv_image = self.blur_faces(cv_image)
 
         img_height, img_width, _ = cv_image.shape
         new_image_size = max(img_height, img_width)
-        render_image_size = self.cfg.render.res * self.cfg.render.up_scale
-        ratio_ = self.cfg.render.res * self.cfg.render.up_scale / new_image_size
+        render_image_size = self.cfg.res * self.cfg.up_scale_factor
+        ratio_ = self.cfg.res * self.cfg.up_scale_factor / new_image_size
 
         delta_w = new_image_size - img_width
         delta_h = new_image_size - img_height
@@ -369,10 +377,10 @@ class Visualizer(nn.Module):
         image_padded = cv2.copyMakeBorder(cv_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
         image_resized = cv2.resize(
             image_padded,
-            (self.cfg.render.res * self.cfg.render.up_scale, self.cfg.render.res * self.cfg.render.up_scale),
+            (self.cfg.res * self.cfg.up_scale_factor, self.cfg.res * self.cfg.up_scale_factor),
         )
-        scale_ = self.cfg.render.output_resolution / img_width
-        frame_size = (self.cfg.render.output_resolution * NUM_PANELS, int(img_height * (scale_)))
+        scale_ = self.cfg.output_resolution / img_width
+        frame_size = (self.cfg.output_resolution * NUM_PANELS, int(img_height * (scale_)))
         image_resized_rgb = numpy_to_torch_image(np.array(image_resized) / 255.0)
 
         if len(tracked_ids) > 0:
@@ -381,16 +389,16 @@ class Visualizer(nn.Module):
             tracked_mask = np.array(tracked_mask)
             tracked_bbox = np.array(tracked_bbox)
             tracked_cameras = np.array(tracked_cameras)
-            tracked_cameras[:, 2] = tracked_cameras[:, 2] / self.cfg.render.up_scale
+            tracked_cameras[:, 2] = tracked_cameras[:, 2] / self.cfg.up_scale_factor
 
-            if "HUMAN" in self.cfg.render.type:
+            if "HUMAN" in self.cfg.type:
                 ids_x = tracked_time == 0
-            elif "TRACKID" in self.cfg.render.type:
+            elif "TRACKID" in self.cfg.type:
                 ids_x = np.logical_and(
                     tracked_time == 0,
-                    np.array(tracked_ids) == int(self.cfg.render.type.split("TRACKID_")[1].split("_")[0]),
+                    np.array(tracked_ids) == int(self.cfg.type.split("TRACKID_")[1].split("_")[0]),
                 )
-            elif "GHOST" in self.cfg.render.type:
+            elif "GHOST" in self.cfg.type:
                 ids_x = tracked_time <= 0
                 ids_g = tracked_time[ids_x] == -1
             else:
@@ -400,7 +408,7 @@ class Visualizer(nn.Module):
             tracked_ids_x = tracked_ids_x[ids_x]
             tracked_colors = np.array(self.colors[list(tracked_ids_x)]) / 255.0
 
-            # if "GHOST" in self.cfg.render.type:
+            # if "GHOST" in self.cfg.type:
             #     tracked_colors[ids_g] = tracked_colors[ids_g]*0.5
 
             if PANEL_TEXTURE:
@@ -409,7 +417,7 @@ class Visualizer(nn.Module):
                 uv_maps = tracked_appe[:, :3, :, :]
 
             if len(tracked_ids_x) > 0:
-                if "MESH" in self.cfg.render.type:
+                if "MESH" in self.cfg.type:
                     rendered_image_final, valid_mask = self.render_single_frame(
                         tracked_smpl[ids_x],
                         tracked_cameras[ids_x],
@@ -430,7 +438,7 @@ class Visualizer(nn.Module):
                         :, :, top_ : top_ + img_height_, left_ : left_ + img_width_
                     ]
 
-                if "MASK" in self.cfg.render.type or "BBOX" in self.cfg.render.type:
+                if "MASK" in self.cfg.type or "BBOX" in self.cfg.type:
                     seg_mask = tracked_mask[ids_x]
                     seg_bbox = tracked_bbox[ids_x]
                     for i, tr in enumerate(tracked_ids_x):

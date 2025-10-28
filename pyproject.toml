@@ -7,20 +7,25 @@ authors = [
 requires-python = ">=3.8,<3.9"
 version = "0.1.0"
 dependencies = [
+    "debugpy>=1.8.5,<2",
     "gymtorch",
     "humanoid-vision",
     "isaacgym",
-    "puffer-phc",
-
-    "debugpy>=1.8.5,<2",
     "joblib>=1.4.2,<2",
+    "jupyter>=1.1.1",
     "polars>=1.5.0,<2",
+    "puffer-phc",
     "tyro>=0.8.14,<0.9",
     "wandb>=0.16.6,<0.17",
-
-    "carbs @ git+https://github.com/PufferAI/carbs.git",    
+    "carbs @ git+https://github.com/PufferAI/carbs.git",
     "pufferlib @ git+https://github.com/kywch/PufferLib.git",
     "smpl_sim @ git+https://github.com/kywch/SMPLSim.git",
+    "marimo",
+]
+
+[project.optional-dependencies]
+vim = [
+    "jupyterlab-vim>=4.1.4",
 ]
 
 [tool.uv.sources]
