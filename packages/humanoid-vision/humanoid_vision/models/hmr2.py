@@ -10,7 +10,6 @@ from yacs.config import CfgNode
 
 
 from humanoid_vision.utils.mesh_renderer import MeshRenderer
-from humanoid_vision.utils.skeleton_renderer import SkeletonRenderer
 from humanoid_vision.utils.geometry import aa_to_rotmat, perspective_projection
 from humanoid_vision.utils.pylogger import get_pylogger
 from humanoid_vision.models.backbones.vit import vit
@@ -65,10 +64,8 @@ class HMR2(pl.LightningModule):
         self.register_buffer("initialized", torch.tensor(False))
         # Setup renderer for visualization
         if init_renderer:
-            self.renderer = SkeletonRenderer(self.cfg)
             self.mesh_renderer = MeshRenderer(self.cfg, faces=self.smpl.faces)
         else:
-            self.renderer = None
             self.mesh_renderer = None
 
         # Disable automatic optimization since we use adversarial training

@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 
 from humanoid_vision.models.hmar.hmr2 import HMR2023TextureSampler
-from humanoid_vision.deep_sort.feature_distances import get_pose_distance, get_uv_distance
+from humanoid_vision.deep_sort.feature_distances import get_pose_distance
 
 
 def _pdist_l2(a, b):
@@ -72,7 +72,7 @@ def _pdist(a, b, prediction_features, distance_type, shot, HMAR: Optional[HMR202
             for iy in range(len(b_appe)):
                 accc = copy.deepcopy(a_uv[ix])
                 bccc = copy.deepcopy(b_uv[iy])
-                xu, yu, cu = get_uv_distance(HMAR, accc, bccc)
+                xu, yu, cu = HMAR.get_uv_distance(accc, bccc)
                 r_texture[ix, iy] = np.sum((xu - yu) ** 2) * 100
                 if distance_type == "EQ_021":
                     r_texture[ix, iy] *= np.exp((1 - cu) / 2)
@@ -147,7 +147,7 @@ def _nn_euclidean_distance_min(x, y, *args, **kwargs):
     return np.maximum(0.0, distances_a.min(axis=0))
 
 
-class NearestNeighborDistanceMetric(object):
+class NearestNeighborDistanceMetric:
     """
     A nearest neighbor distance metric that, for each target, returns
     the closest distance to any sample that has been observed so far.
